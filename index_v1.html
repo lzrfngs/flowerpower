@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flower Power</title>
+<!--
+  Rendering: Canvas 2D API — radial gradient blobs, single blur pass, paper texture
+  No libraries. IBM Plex Mono via Google Fonts.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --cream:  #EAE4D8;
+  --panel:  #DDD7CB;
+  --border: #BFB8A8;
+  --text:   #4A4030;
+  --dim:    #8A8070;
+  --accent: #3A3020;
+  --track:  #C8C0B0;
+}
+
+body {
+  background: var(--cream);
+  font-family: 'IBM Plex Mono', monospace;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  color: var(--text);
+}
+
+canvas#c {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  display: block;
+}
+
+/* ── Registration marks ── */
+#reg-marks {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+#reg-marks span {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #9A8F80;
+  opacity: 0.28;
+  display: block;
+}
+#reg-marks span:nth-child(1) { top:14px;    left:14px;   border-right:0; border-bottom:0; }
+#reg-marks span:nth-child(2) { top:14px;    right:14px;  border-left:0;  border-bottom:0; }
+#reg-marks span:nth-child(3) { bottom:14px; left:14px;   border-right:0; border-top:0; }
+#reg-marks span:nth-child(4) { bottom:14px; right:14px;  border-left:0;  border-top:0; }
+
+/* ── Spine label ── */
+#spine {
+  position: fixed;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%) rotate(180deg);
+  writing-mode: vertical-rl;
+  font-size: 7px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--dim);
+  opacity: 0.45;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* ── Bottom panel ── */
+#panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 28px 14px;
+  gap: 10px;
+}
+
+/* State selector row */
+#state-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#state-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.state-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 4px;
+  border: 1px solid transparent;
+  user-select: none;
+  transition: border-color 0.12s;
+}
+.state-tab:hover       { border-color: var(--dim); }
+.state-tab.active      { border-color: var(--accent); }
+
+.thumb {
+  display: block;
+  width: 64px;
+  height: 64px;
+}
+
+.tab-label {
+  font-size: 7px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.state-tab.active .tab-label { color: var(--accent); }
+
+/* Play / pause */
+#btn-play {
+  width: 34px;
+  height: 34px;
+  background: var(--accent);
+  color: var(--cream);
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: opacity 0.12s;
+  margin-left: auto;
+}
+#btn-play:hover { opacity: 0.75; }
+
+/* Status */
+#status {
+  font-size: 7px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+  opacity: 0.5;
+  min-width: 60px;
+  text-align: right;
+}
+
+/* Divider */
+.rule {
+  height: 1px;
+  background: var(--border);
+  opacity: 0.6;
+}
+
+/* Control rows */
+.ctrl-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+}
+
+.ctrl-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+
+.ctrl-label {
+  font-size: 7px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.ctrl-with-val {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ctrl-val {
+  font-size: 8px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── Custom sliders ── */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(to right,
+    var(--accent) 0%, var(--accent) var(--fill, 0%),
+    var(--track)  var(--fill, 0%), var(--track) 100%);
+  outline: none;
+  cursor: pointer;
+  border-radius: 0;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 2px;
+  height: 11px;
+  background: var(--accent);
+  border-radius: 0;
+  cursor: pointer;
+}
+input[type=range]::-moz-range-thumb {
+  width: 2px;
+  height: 11px;
+  background: var(--accent);
+  border-radius: 0;
+  cursor: pointer;
+  border: none;
+}
+
+/* ── Palette swatches ── */
+#swatches {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.swatch-btn {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: none;
+  transition: border-color 0.1s;
+  border-radius: 0;
+  font-family: inherit;
+}
+.swatch-btn:hover  { border-color: var(--dim); }
+.swatch-btn.active { border-color: var(--accent); }
+
+.swatch-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Per-state + global label */
+.section-label {
+  font-size: 6px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--dim);
+  opacity: 0.5;
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="reg-marks"><span></span><span></span><span></span><span></span></div>
+<div id="spine">watercolor · radial · loop</div>
+
+<div id="panel">
+
+  <!-- Row 1: State tabs + play -->
+  <div id="state-row">
+    <div id="state-tabs">
+      <div class="state-tab active" data-idx="0">
+        <canvas class="thumb" width="128" height="128"></canvas>
+        <span class="tab-label">A</span>
+      </div>
+      <div class="state-tab" data-idx="1">
+        <canvas class="thumb" width="128" height="128"></canvas>
+        <span class="tab-label">B</span>
+      </div>
+      <div class="state-tab" data-idx="2">
+        <canvas class="thumb" width="128" height="128"></canvas>
+        <span class="tab-label">C</span>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-left:auto">
+      <button id="btn-play">&#9654;</button>
+      <span id="status">settled · A</span>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- Row 2: Per-state sliders + palette -->
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div class="ctrl-row">
+      <span class="section-label">State</span>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Petals</span>
+        <div class="ctrl-with-val">
+          <input type="range" id="s-count" min="5" max="13" step="1" value="7">
+          <span class="ctrl-val" id="v-count">7</span>
+        </div>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Reach</span>
+        <div class="ctrl-with-val">
+          <input type="range" id="s-reach" min="0.30" max="0.85" step="0.01" value="0.65">
+          <span class="ctrl-val" id="v-reach">0.65</span>
+        </div>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Spread</span>
+        <div class="ctrl-with-val">
+          <input type="range" id="s-spread" min="0" max="1" step="0.01" value="0.45">
+          <span class="ctrl-val" id="v-spread">0.45</span>
+        </div>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Twist</span>
+        <div class="ctrl-with-val">
+          <input type="range" id="s-twist" min="0" max="359" step="1" value="0">
+          <span class="ctrl-val" id="v-twist">0°</span>
+        </div>
+      </div>
+    </div>
+    <div id="swatches"></div>
+  </div>
+
+  <div class="rule"></div>
+
+  <!-- Row 3: Global controls -->
+  <div class="ctrl-row">
+    <span class="section-label">Global</span>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Blur</span>
+      <div class="ctrl-with-val">
+        <input type="range" id="g-blur" min="0.01" max="0.14" step="0.005" value="0.06">
+        <span class="ctrl-val" id="v-blur">0.060</span>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Tempo</span>
+      <div class="ctrl-with-val">
+        <input type="range" id="g-tempo" min="0.25" max="3" step="0.05" value="1">
+        <span class="ctrl-val" id="v-tempo">1.00×</span>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Pulse</span>
+      <div class="ctrl-with-val">
+        <input type="range" id="g-pulse" min="0" max="1" step="0.01" value="0.50">
+        <span class="ctrl-val" id="v-pulse">0.50</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────
+// Flower Power — Canvas 2D, no libraries
+// Radial gradient blobs → single blur pass → watercolor
+// ─────────────────────────────────────────────────────────
+
+// ── Seeded PRNG (mulberry32) ──────────────────────────────
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ── Math utils ───────────────────────────────────────────
+const lerp  = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function lerpHue(a, b, t) {
+  let d = ((b - a) % 360 + 360) % 360;
+  if (d > 180) d -= 360;
+  return ((a + d * t) % 360 + 360) % 360;
+}
+
+// Easing
+const easeIn    = t => t * t * t;
+const easeOut   = t => 1 - Math.pow(1 - t, 4);
+const easeInOut = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+// ── State defaults ────────────────────────────────────────
+const DEFAULTS = [
+  { count: 7, reach: 0.65, spread: 0.45, twist:  0, petalHue:  50, gapHue: 330, centerHue:  45 }, // A
+  { count: 9, reach: 0.55, spread: 0.30, twist: 20, petalHue: 210, gapHue:  15, centerHue: 185 }, // B
+  { count: 6, reach: 0.72, spread: 0.60, twist: 45, petalHue:  25, gapHue: 330, centerHue:   5 }, // C
+];
+const states = DEFAULTS.map(s => ({ ...s }));
+
+// ── Curated palettes ──────────────────────────────────────
+// Each: { name, p: petalHue, g: gapHue, c: centerHue }
+const PALETTES = [
+  { name: 'solar',  p:  50, g: 330, c:  45 },
+  { name: 'reef',   p: 210, g:  15, c: 185 },
+  { name: 'ember',  p:  25, g: 330, c:   5 },
+  { name: 'mist',   p: 270, g: 150, c: 280 },
+  { name: 'garden', p: 350, g: 120, c:  10 },
+  { name: 'shore',  p: 175, g:  25, c: 190 },
+  { name: 'autumn', p:   5, g:  40, c: 355 },
+  { name: 'dusk',   p: 280, g:  85, c: 250 },
+];
+
+// ── Global params ─────────────────────────────────────────
+const globals = { blur: 0.06, tempo: 1.0, pulse: 0.50 };
+
+// ── Breathing oscillators (pre-generated, stable) ─────────
+const BREATHE = Array.from({ length: 30 }, (_, i) => ({
+  period: 1.5 + (i * 0.618033988) % 2.5,      // golden-ratio spread
+  phase:  (i * 2.399963229) % (Math.PI * 2),  // golden-ratio spread
+}));
+
+// ── Animation state ───────────────────────────────────────
+let isPlaying   = true;
+let activeTab   = 0;
+let animIdx     = 0;       // current settled state index
+let animPhase   = 'settling';
+let dwellTime   = 8;
+let dwellElapsed = 0;
+let transitionT  = 0;
+const TRANS_DUR  = 2.0;    // seconds at tempo=1
+let loopSeed     = 42;
+let lastTime     = null;
+let globalTime   = 0;
+
+// ── Canvas / offscreen ────────────────────────────────────
+const canvas    = document.getElementById('c');
+const ctx       = canvas.getContext('2d');
+const offscreen = document.createElement('canvas');
+const offCtx    = offscreen.getContext('2d');
+let textureCanvas = null;
+let panelH = 0;
+let DPR    = 1;
+// Render flower at half resolution, then blur-upscale — huge perf win
+const RENDER_SCALE = 0.5;
+let renderW = 0, renderH = 0;
+
+function resize() {
+  DPR    = window.devicePixelRatio || 1;
+  panelH = document.getElementById('panel').offsetHeight;
+  canvas.width  = window.innerWidth  * DPR;
+  canvas.height = window.innerHeight * DPR;
+  renderW = Math.round(canvas.width  * RENDER_SCALE);
+  renderH = Math.round(canvas.height * RENDER_SCALE);
+  offscreen.width  = renderW;
+  offscreen.height = renderH;
+  if (!textureCanvas || textureCanvas.width !== canvas.width) {
+    textureCanvas = makeTexture(canvas.width, canvas.height);
+  }
+}
+
+// ── Paper texture (generated once) ───────────────────────
+function makeTexture(w, h) {
+  const tc   = document.createElement('canvas');
+  tc.width   = w; tc.height = h;
+  const tctx = tc.getContext('2d');
+  const img  = tctx.createImageData(w, h);
+  const d    = img.data;
+  // Simple grain — fast, good enough at 7% multiply opacity
+  for (let i = 0; i < d.length; i += 4) {
+    const v = Math.random() * 255 | 0;
+    d[i] = d[i+1] = d[i+2] = v;
+    d[i+3] = 255;
+  }
+  tctx.putImageData(img, 0, 0);
+  return tc;
+}
+
+// ── Draw one blob ─────────────────────────────────────────
+// Blob is a radial gradient ellipse drawn in local space then composited.
+// angle: the petal's radial angle (radians) — blob is rotated to align
+// rRad: radius along the radial axis (petal length)
+// rTan: radius along the tangential axis (petal width)
+function drawBlob(fc, x, y, angle, rRad, rTan, hue, sat, lit, alpha) {
+  fc.save();
+  fc.translate(x, y);
+  fc.rotate(angle);
+  // Gradient with held opacity core → sharper falloff for petal definition
+  const g = fc.createRadialGradient(0, 0, 0, 0, 0, 1);
+  g.addColorStop(0,    `hsla(${hue | 0},${sat}%,${lit}%,${alpha})`);
+  g.addColorStop(0.30, `hsla(${hue | 0},${sat}%,${lit}%,${alpha * 0.90})`);
+  g.addColorStop(0.55, `hsla(${hue | 0},${sat}%,${lit}%,${alpha * 0.50})`);
+  g.addColorStop(0.78, `hsla(${hue | 0},${sat}%,${lit}%,${alpha * 0.12})`);
+  g.addColorStop(1,    `hsla(${hue | 0},${sat}%,${lit}%,0)`);
+  fc.scale(rTan, rRad);  // x=tangential width, y=radial height
+  fc.beginPath();
+  fc.arc(0, 0, 1, 0, Math.PI * 2);
+  fc.fillStyle = g;
+  fc.fill();
+  fc.restore();
+}
+
+// ── Draw entire flower to a context ──────────────────────
+// st: display state (may be interpolated / breathing-adjusted)
+// cx, cy: center in pixels
+// halfSize: reference radius (half the smaller canvas dimension)
+// t: global time in seconds (for breathing)
+// seed: PRNG seed for organic jitter
+function drawFlower(fc, st, cx, cy, halfSize, t, seed) {
+  const { count, reach, spread, petalHue, gapHue, centerHue, twist } = st;
+  const totalR = reach * halfSize;
+  const N      = Math.max(2, Math.round(count));
+  const twistR = (twist || 0) * Math.PI / 180;
+  const rng    = mulberry32(seed);
+
+  // Petal blob dimensions — more elongated for petal-like silhouette
+  const petalRad = totalR * 0.62;
+  const petalTan = totalR * (0.10 + spread * 0.24);
+
+  // Gap blob dimensions
+  const gapRad   = totalR * 0.28;
+  const gapTan   = totalR * (0.22 + spread * 0.16);
+
+  // Radial center distances — push petals further out from center
+  const petalDist = totalR * 0.52;
+  const gapDist   = totalR * 0.36;
+
+  // Spine blob dimensions — narrow high-opacity vein per petal
+  const spineRad = totalR * 0.48;
+  const spineTan = totalR * (0.03 + spread * 0.05);
+
+  // ── Gap blobs (between petals) — darker, more saturated ──
+  for (let i = 0; i < N; i++) {
+    const angle   = twistR + (i + 0.5) * (Math.PI * 2 / N);
+    const bi      = (i + N) % 30;
+    const breathe = Math.sin(t / BREATHE[bi].period + BREATHE[bi].phase) * 0.04;
+    const jitter  = (rng() - 0.5) * 0.06;
+    const dist    = gapDist * (1 + breathe + jitter);
+    const bx = cx + dist * Math.cos(angle);
+    const by = cy + dist * Math.sin(angle);
+    const rJit = 0.88 + rng() * 0.24;
+    drawBlob(fc, bx, by, angle,
+      gapRad * rJit, gapTan * rJit,
+      gapHue, 78, 52, 0.60 + rng() * 0.10);
+  }
+
+  // ── Petal blobs — rich saturation, lower lightness ──
+  for (let i = 0; i < N; i++) {
+    const angle   = twistR + i * (Math.PI * 2 / N);
+    const bi      = i % 30;
+    const breathe = Math.sin(t / BREATHE[bi].period + BREATHE[bi].phase) * 0.04;
+    const jitter  = (rng() - 0.5) * 0.06;
+    const dist    = petalDist * (1 + breathe + jitter);
+    const bx = cx + dist * Math.cos(angle);
+    const by = cy + dist * Math.sin(angle);
+    const rJit = 0.88 + rng() * 0.24;
+    drawBlob(fc, bx, by, angle,
+      petalRad * rJit, petalTan * rJit,
+      petalHue, 82, 52, 0.78 + rng() * 0.10);
+  }
+
+  // ── Spine blobs — dark vein for internal structure ──
+  for (let i = 0; i < N; i++) {
+    const angle   = twistR + i * (Math.PI * 2 / N);
+    const bi      = i % 30;
+    const breathe = Math.sin(t / BREATHE[bi].period + BREATHE[bi].phase) * 0.04;
+    const dist    = petalDist * (1 + breathe) * 0.95;
+    const bx = cx + dist * Math.cos(angle);
+    const by = cy + dist * Math.sin(angle);
+    drawBlob(fc, bx, by, angle,
+      spineRad, spineTan,
+      petalHue, 88, 40, 0.55);
+  }
+
+  // ── Center glow (pre-blur layer) — bright, high contrast ──
+  const cbreathe = Math.sin(t / 2.0 + 1.1) * 0.08;
+  const centerR  = totalR * (0.30 + cbreathe);
+  const cg = fc.createRadialGradient(cx, cy, 0, cx, cy, centerR);
+  cg.addColorStop(0,    `hsla(${centerHue | 0}, 85%, 82%, 0.95)`);
+  cg.addColorStop(0.30, `hsla(${centerHue | 0}, 80%, 72%, 0.70)`);
+  cg.addColorStop(0.65, `hsla(${centerHue | 0}, 75%, 60%, 0.25)`);
+  cg.addColorStop(1,    `hsla(${centerHue | 0}, 70%, 55%, 0)`);
+  fc.beginPath();
+  fc.arc(cx, cy, centerR, 0, Math.PI * 2);
+  fc.fillStyle = cg;
+  fc.fill();
+}
+
+// ── Transition reach curve (coil → burst → settle) ───────
+function reachBurst(t, pulse) {
+  if (t < 0.15) {
+    // Coil: slight inhale
+    return 1 - easeIn(t / 0.15) * 0.05;
+  } else if (t < 0.40) {
+    // Burst: expand past target
+    const s = (t - 0.15) / 0.25;
+    return lerp(0.95, 1 + pulse * 0.28, easeIn(s));
+  } else {
+    // Settle: ease to target
+    const s = (t - 0.40) / 0.60;
+    return lerp(1 + pulse * 0.28, 1.0, easeOut(s));
+  }
+}
+
+// ── Interpolate between two states ───────────────────────
+function interpStates(from, to, t, pulse) {
+  const st  = easeInOut(t);  // smooth progress for most params
+  const bst = reachBurst(t, pulse);
+  return {
+    count:     lerp(from.count,  to.count,  st),
+    reach:     lerp(from.reach,  to.reach,  st) * bst,
+    spread:    lerp(from.spread, to.spread, st),
+    twist:     lerp(from.twist,  to.twist,  st),
+    petalHue:  lerpHue(from.petalHue,  to.petalHue,  st),
+    gapHue:    lerpHue(from.gapHue,    to.gapHue,    st),
+    centerHue: lerpHue(from.centerHue, to.centerHue, st),
+  };
+}
+
+// ── Render one frame ──────────────────────────────────────
+function renderFrame(st) {
+  const W      = canvas.width;
+  const H      = canvas.height;
+  const panelPx = panelH * DPR;
+  const visH   = H - panelPx;
+  const cx     = W / 2;
+  const cy     = visH / 2;
+  const half   = Math.min(W, visH) * 0.5 * 0.88;
+
+  // Half-res coordinates for offscreen
+  const oCx   = renderW / 2;
+  const oCy   = (renderH - panelPx * RENDER_SCALE) / 2;
+  const oHalf = Math.min(renderW, renderH - panelPx * RENDER_SCALE) * 0.5 * 0.88;
+  const blurPx = globals.blur * oHalf * 2;
+
+  // 1. Draw flower to half-res offscreen
+  offCtx.fillStyle = '#EAE4D8';
+  offCtx.fillRect(0, 0, renderW, renderH);
+  drawFlower(offCtx, st, oCx, oCy, oHalf, globalTime, loopSeed);
+
+  // 2. Blur half-res offscreen, then upscale to full canvas
+  ctx.fillStyle = '#EAE4D8';
+  ctx.fillRect(0, 0, W, H);
+  ctx.filter = `blur(${blurPx}px)`;
+  ctx.drawImage(offscreen, 0, 0, renderW, renderH, 0, 0, W, H);
+  ctx.filter = 'none';
+
+  // 3. Post-blur center glow — stays crisper than the blurred layer
+  const cbreathe = Math.sin(globalTime / 2.0 + 1.1) * 0.08;
+  const crH      = st.centerHue | 0;
+  const crR      = st.reach * half * (0.18 + cbreathe);
+  const cg2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, crR);
+  cg2.addColorStop(0,   `hsla(${crH}, 88%, 82%, 0.65)`);
+  cg2.addColorStop(0.4, `hsla(${crH}, 82%, 70%, 0.25)`);
+  cg2.addColorStop(1,   `hsla(${crH}, 75%, 60%, 0)`);
+  ctx.beginPath();
+  ctx.arc(cx, cy, crR, 0, Math.PI * 2);
+  ctx.fillStyle = cg2;
+  ctx.fill();
+
+  // 4. Paper texture overlay (multiply, very low opacity)
+  if (textureCanvas) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = 0.07;
+    ctx.drawImage(textureCanvas, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ── Render thumbnail for a state card ────────────────────
+// Reuse a single temp canvas across all thumb renders
+const _thumbTmp    = document.createElement('canvas');
+_thumbTmp.width    = 128; _thumbTmp.height = 128;
+const _thumbTmpCtx = _thumbTmp.getContext('2d');
+
+function renderThumb(idx) {
+  const thumb = document.querySelectorAll('.thumb')[idx];
+  const tw    = thumb.width;
+  const th    = thumb.height;
+  const tc    = thumb.getContext('2d');
+  const half  = Math.min(tw, th) * 0.40;
+  const cx    = tw / 2;
+  const cy    = th / 2;
+  const blurPx = globals.blur * half * 1.8;
+
+  _thumbTmpCtx.fillStyle = '#EAE4D8';
+  _thumbTmpCtx.fillRect(0, 0, tw, th);
+  drawFlower(_thumbTmpCtx, states[idx], cx, cy, half, 0, idx * 1000);
+
+  tc.fillStyle = '#EAE4D8';
+  tc.fillRect(0, 0, tw, th);
+  tc.filter = `blur(${blurPx}px)`;
+  tc.drawImage(_thumbTmp, 0, 0);
+  tc.filter = 'none';
+}
+
+// Debounced thumb render — sliders fire dozens of events per drag
+let _thumbTimer = null;
+function scheduleThumbRender(idx) {
+  if (_thumbTimer) cancelAnimationFrame(_thumbTimer);
+  _thumbTimer = requestAnimationFrame(() => { renderThumb(idx); _thumbTimer = null; });
+}
+
+function renderAllThumbs() {
+  for (let i = 0; i < 3; i++) renderThumb(i);
+}
+
+// ── Main loop ─────────────────────────────────────────────
+function tick(timestamp) {
+  requestAnimationFrame(tick);
+
+  if (lastTime === null) lastTime = timestamp;
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.10);
+  lastTime    = timestamp;
+  globalTime  = timestamp / 1000;
+
+  let displayState;
+
+  if (!isPlaying) {
+    renderFrame(states[animIdx]);
+    return;
+  }
+
+  if (animPhase === 'settling') {
+    dwellElapsed += dt * globals.tempo;
+    displayState = states[animIdx];
+    if (dwellElapsed >= dwellTime) {
+      animPhase    = 'transitioning';
+      transitionT  = 0;
+      dwellElapsed = 0;
+      // Seed stays constant — changing it caused visible blob-position pops
+    }
+    updateStatus(`settled · ${'ABC'[animIdx]}`);
+  } else {
+    transitionT += dt * globals.tempo / TRANS_DUR;
+    if (transitionT >= 1) {
+      transitionT = 1;
+      animIdx     = (animIdx + 1) % 3;
+      animPhase   = 'settling';
+      dwellTime   = 6 + Math.random() * 4;
+      updateStatus(`settled · ${'ABC'[animIdx]}`);
+    } else {
+      updateStatus(`→ ${'BCA'[animIdx]}`);
+    }
+    displayState = interpStates(
+      states[animIdx],
+      states[(animIdx + 1) % 3],
+      transitionT,
+      globals.pulse
+    );
+  }
+
+  renderFrame(displayState);
+}
+
+function updateStatus(txt) {
+  document.getElementById('status').textContent = txt;
+}
+
+// ── Slider fill ───────────────────────────────────────────
+function setFill(el) {
+  const pct = ((parseFloat(el.value) - parseFloat(el.min)) /
+               (parseFloat(el.max)  - parseFloat(el.min)) * 100).toFixed(1) + '%';
+  el.style.setProperty('--fill', pct);
+}
+
+// ── Sync all per-state sliders to a state ─────────────────
+function syncToState(idx) {
+  const s = states[idx];
+  [
+    ['s-count',  s.count,  'v-count',  v => `${Math.round(v)}`],
+    ['s-reach',  s.reach,  'v-reach',  v => v.toFixed(2)],
+    ['s-spread', s.spread, 'v-spread', v => v.toFixed(2)],
+    ['s-twist',  s.twist,  'v-twist',  v => `${Math.round(v)}°`],
+  ].forEach(([id, val, vid, fmt]) => {
+    const el = document.getElementById(id);
+    el.value = val;
+    setFill(el);
+    document.getElementById(vid).textContent = fmt(val);
+  });
+}
+
+// ── Build palette swatches ────────────────────────────────
+function buildSwatches() {
+  const container = document.getElementById('swatches');
+  PALETTES.forEach((pal, i) => {
+    const btn = document.createElement('button');
+    btn.className   = 'swatch-btn';
+    btn.title       = pal.name;
+    btn.dataset.idx = i;
+    [pal.p, pal.g, pal.c].forEach(hue => {
+      const dot = document.createElement('span');
+      dot.className = 'swatch-dot';
+      dot.style.background = `hsl(${hue}, 68%, 65%)`;
+      btn.appendChild(dot);
+    });
+    btn.addEventListener('click', () => {
+      const s = states[activeTab];
+      s.petalHue = pal.p; s.gapHue = pal.g; s.centerHue = pal.c;
+      document.querySelectorAll('.swatch-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      scheduleThumbRender(activeTab);
+    });
+    container.appendChild(btn);
+  });
+}
+
+// ── Wire up everything ────────────────────────────────────
+function init() {
+  resize();
+  window.addEventListener('resize', () => { resize(); renderAllThumbs(); });
+
+  buildSwatches();
+
+  // State tabs
+  document.querySelectorAll('.state-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      activeTab = parseInt(tab.dataset.idx);
+      document.querySelectorAll('.state-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      syncToState(activeTab);
+    });
+  });
+
+  // Per-state sliders
+  [
+    { id: 's-count',  key: 'count',  vid: 'v-count',  fmt: v => `${Math.round(v)}` },
+    { id: 's-reach',  key: 'reach',  vid: 'v-reach',  fmt: v => v.toFixed(2) },
+    { id: 's-spread', key: 'spread', vid: 'v-spread',  fmt: v => v.toFixed(2) },
+    { id: 's-twist',  key: 'twist',  vid: 'v-twist',   fmt: v => `${Math.round(v)}°` },
+  ].forEach(({ id, key, vid, fmt }) => {
+    const el = document.getElementById(id);
+    setFill(el);
+    el.addEventListener('input', () => {
+      const val = parseFloat(el.value);
+      states[activeTab][key] = val;
+      document.getElementById(vid).textContent = fmt(val);
+      setFill(el);
+      scheduleThumbRender(activeTab);
+    });
+  });
+
+  // Global sliders
+  [
+    { id: 'g-blur',  key: 'blur',  vid: 'v-blur',  fmt: v => v.toFixed(3) },
+    { id: 'g-tempo', key: 'tempo', vid: 'v-tempo', fmt: v => `${v.toFixed(2)}×` },
+    { id: 'g-pulse', key: 'pulse', vid: 'v-pulse', fmt: v => v.toFixed(2) },
+  ].forEach(({ id, key, vid, fmt }) => {
+    const el = document.getElementById(id);
+    el.value = globals[key];
+    setFill(el);
+    document.getElementById(vid).textContent = fmt(globals[key]);
+    el.addEventListener('input', () => {
+      const val = parseFloat(el.value);
+      globals[key] = val;
+      document.getElementById(vid).textContent = fmt(val);
+      setFill(el);
+    });
+  });
+
+  // Play / pause — ▶ = paused (click to play), ❚❚ = playing (click to pause)
+  const btnPlay = document.getElementById('btn-play');
+  btnPlay.innerHTML = '&#9646;&#9646;'; // starts playing
+  btnPlay.addEventListener('click', () => {
+    isPlaying = !isPlaying;
+    btnPlay.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
+    lastTime = null;
+  });
+
+  syncToState(0);
+  renderAllThumbs();
+  requestAnimationFrame(tick);
+}
+
+init();
+</script>
+</body>
+</html>

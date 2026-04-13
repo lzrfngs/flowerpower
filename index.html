@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Flower Power</title>
 <!--
-  Rendering: Canvas 2D API — radial gradient blobs, single blur pass, paper texture
-  No libraries. IBM Plex Mono via Google Fonts.
+  Rendering: p5.js â€” bezier petal shapes, layered watercolor technique
+  Perlin noise for organic animation. No sequential PRNG.
+  IBM Plex Mono via Google Fonts.
 -->
+<script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
@@ -33,16 +35,7 @@ body {
   color: var(--text);
 }
 
-canvas#c {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  display: block;
-}
-
-/* ── Registration marks ── */
+/* â”€â”€ Registration marks â”€â”€ */
 #reg-marks {
   position: fixed;
   inset: 0;
@@ -62,7 +55,7 @@ canvas#c {
 #reg-marks span:nth-child(3) { bottom:14px; left:14px;   border-right:0; border-top:0; }
 #reg-marks span:nth-child(4) { bottom:14px; right:14px;  border-left:0;  border-top:0; }
 
-/* ── Spine label ── */
+/* â”€â”€ Spine label â”€â”€ */
 #spine {
   position: fixed;
   left: 14px;
@@ -78,7 +71,7 @@ canvas#c {
   pointer-events: none;
 }
 
-/* ── Bottom panel ── */
+/* â”€â”€ Bottom panel â”€â”€ */
 #panel {
   position: fixed;
   bottom: 0;
@@ -206,7 +199,7 @@ canvas#c {
   flex-shrink: 0;
 }
 
-/* ── Custom sliders ── */
+/* â”€â”€ Custom sliders â”€â”€ */
 input[type=range] {
   -webkit-appearance: none;
   appearance: none;
@@ -236,7 +229,7 @@ input[type=range]::-moz-range-thumb {
   border: none;
 }
 
-/* ── Palette swatches ── */
+/* â”€â”€ Palette swatches â”€â”€ */
 #swatches {
   display: flex;
   gap: 5px;
@@ -279,10 +272,10 @@ input[type=range]::-moz-range-thumb {
 </head>
 <body>
 
-<canvas id="c"></canvas>
+<!-- p5.js creates its own canvas â€” no static canvas element needed -->
 
 <div id="reg-marks"><span></span><span></span><span></span><span></span></div>
-<div id="spine">watercolor · radial · loop</div>
+<div id="spine">watercolor &middot; radial &middot; loop</div>
 
 <div id="panel">
 
@@ -303,8 +296,8 @@ input[type=range]::-moz-range-thumb {
       </div>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-left:auto">
-      <button id="btn-play">&#9654;</button>
-      <span id="status">settled · A</span>
+      <button id="btn-play">&#9646;&#9646;</button>
+      <span id="status">settled Â· A</span>
     </div>
   </div>
 
@@ -339,16 +332,15 @@ input[type=range]::-moz-range-thumb {
         <span class="ctrl-label">Twist</span>
         <div class="ctrl-with-val">
           <input type="range" id="s-twist" min="0" max="359" step="1" value="0">
-          <span class="ctrl-val" id="v-twist">0°</span>
+          <span class="ctrl-val" id="v-twist">0&deg;</span>
         </div>
       </div>
     </div>
     <div id="swatches"></div>
   </div>
 
+  <!-- Global controls commented out until basics are solid
   <div class="rule"></div>
-
-  <!-- Row 3: Global controls -->
   <div class="ctrl-row">
     <span class="section-label">Global</span>
     <div class="ctrl-group">
@@ -362,7 +354,7 @@ input[type=range]::-moz-range-thumb {
       <span class="ctrl-label">Tempo</span>
       <div class="ctrl-with-val">
         <input type="range" id="g-tempo" min="0.25" max="3" step="0.05" value="1">
-        <span class="ctrl-val" id="v-tempo">1.00×</span>
+        <span class="ctrl-val" id="v-tempo">1.00&times;</span>
       </div>
     </div>
     <div class="ctrl-group">
@@ -373,41 +365,19 @@ input[type=range]::-moz-range-thumb {
       </div>
     </div>
   </div>
+  -->
 
 </div>
 
 <script>
-// ─────────────────────────────────────────────────────────
-// Flower Power — Canvas 2D, no libraries
-// Radial gradient blobs → single blur pass → watercolor
-// ─────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Flower Power â€” p5.js generative petals
+// Bezier petal shapes + Perlin noise for organic variation.
+// No sequential PRNG â€” noise(index) gives stable per-petal
+// variation that doesn't cascade when parameters change.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// ── Seeded PRNG (mulberry32) ──────────────────────────────
-function mulberry32(seed) {
-  return function () {
-    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-
-// ── Math utils ───────────────────────────────────────────
-const lerp  = (a, b, t) => a + (b - a) * t;
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-function lerpHue(a, b, t) {
-  let d = ((b - a) % 360 + 360) % 360;
-  if (d > 180) d -= 360;
-  return ((a + d * t) % 360 + 360) % 360;
-}
-
-// Easing
-const easeIn    = t => t * t * t;
-const easeOut   = t => 1 - Math.pow(1 - t, 4);
-const easeInOut = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-// ── State defaults ────────────────────────────────────────
+// â”€â”€ State defaults â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DEFAULTS = [
   { count: 7, reach: 0.65, spread: 0.45, twist:  0, petalHue:  50, gapHue: 330, centerHue:  45 }, // A
   { count: 9, reach: 0.55, spread: 0.30, twist: 20, petalHue: 210, gapHue:  15, centerHue: 185 }, // B
@@ -415,8 +385,7 @@ const DEFAULTS = [
 ];
 const states = DEFAULTS.map(s => ({ ...s }));
 
-// ── Curated palettes ──────────────────────────────────────
-// Each: { name, p: petalHue, g: gapHue, c: centerHue }
+// â”€â”€ Curated palettes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PALETTES = [
   { name: 'solar',  p:  50, g: 330, c:  45 },
   { name: 'reef',   p: 210, g:  15, c: 185 },
@@ -428,388 +397,459 @@ const PALETTES = [
   { name: 'dusk',   p: 280, g:  85, c: 250 },
 ];
 
-// ── Global params ─────────────────────────────────────────
-const globals = { blur: 0.06, tempo: 1.0, pulse: 0.50 };
-
-// ── Breathing oscillators (pre-generated, stable) ─────────
-const BREATHE = Array.from({ length: 30 }, (_, i) => ({
-  period: 1.5 + (i * 0.618033988) % 2.5,      // golden-ratio spread
-  phase:  (i * 2.399963229) % (Math.PI * 2),  // golden-ratio spread
-}));
-
-// ── Animation state ───────────────────────────────────────
-let isPlaying   = true;
-let activeTab   = 0;
-let animIdx     = 0;       // current settled state index
-let animPhase   = 'settling';
-let dwellTime   = 8;
+// â”€â”€ Animation state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let isPlaying    = true;
+let activeTab    = 0;
+let animIdx      = 0;
+let animPhase    = 'settling';
+let dwellTime    = 8;
 let dwellElapsed = 0;
 let transitionT  = 0;
-const TRANS_DUR  = 2.0;    // seconds at tempo=1
-let loopSeed     = 42;
-let lastTime     = null;
-let globalTime   = 0;
+const TRANS_DUR  = 3.0;
 
-// ── Canvas / offscreen ────────────────────────────────────
-const canvas    = document.getElementById('c');
-const ctx       = canvas.getContext('2d');
-const offscreen = document.createElement('canvas');
-const offCtx    = offscreen.getContext('2d');
-let textureCanvas = null;
-let panelH = 0;
-let DPR    = 1;
+// â”€â”€ Editing state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// When user drags a slider, show that state immediately.
+// Reverts to animation flow 1.5s after last edit.
+let isEditing = false;
+let editTimer = null;
 
-function resize() {
-  DPR    = window.devicePixelRatio || 1;
-  panelH = document.getElementById('panel').offsetHeight;
-  canvas.width  = window.innerWidth  * DPR;
-  canvas.height = window.innerHeight * DPR;
-  offscreen.width  = canvas.width;
-  offscreen.height = canvas.height;
-  if (!textureCanvas || textureCanvas.width !== canvas.width) {
-    textureCanvas = makeTexture(canvas.width, canvas.height);
+function startEditing() {
+  isEditing = true;
+  if (editTimer) clearTimeout(editTimer);
+  editTimer = setTimeout(() => { isEditing = false; editTimer = null; }, 1500);
+}
+
+// â”€â”€ Paper texture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let paperGfx;
+
+function generatePaperTexture() {
+  paperGfx.loadPixels();
+  for (let i = 0; i < paperGfx.pixels.length; i += 4) {
+    let v = random(180, 255);
+    paperGfx.pixels[i]     = v;
+    paperGfx.pixels[i + 1] = v;
+    paperGfx.pixels[i + 2] = v;
+    paperGfx.pixels[i + 3] = 255;
   }
+  paperGfx.updatePixels();
 }
 
-// ── Paper texture (generated once) ───────────────────────
-function makeTexture(w, h) {
-  const tc   = document.createElement('canvas');
-  tc.width   = w; tc.height = h;
-  const tctx = tc.getContext('2d');
-  const img  = tctx.createImageData(w, h);
-  const d    = img.data;
-  // Simple grain — fast, good enough at 7% multiply opacity
-  for (let i = 0; i < d.length; i += 4) {
-    const v = Math.random() * 255 | 0;
-    d[i] = d[i+1] = d[i+2] = v;
-    d[i+3] = 255;
-  }
-  tctx.putImageData(img, 0, 0);
-  return tc;
+// â”€â”€ p5.js lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function setup() {
+  let cnv = createCanvas(windowWidth, windowHeight);
+  // Position canvas behind panel and overlays
+  cnv.style('position', 'fixed');
+  cnv.style('top', '0');
+  cnv.style('left', '0');
+  cnv.style('z-index', '0');
+  cnv.style('display', 'block');
+
+  colorMode(HSB, 360, 100, 100, 100);
+
+  // Paper texture â€” generated once, redrawn on resize
+  paperGfx = createGraphics(width, height);
+  paperGfx.pixelDensity(1);
+  generatePaperTexture();
+
+  initUI();
 }
 
-// ── Draw one blob ─────────────────────────────────────────
-// Blob is a radial gradient ellipse drawn in local space then composited.
-// angle: the petal's radial angle (radians) — blob is rotated to align
-// rRad: radius along the radial axis (petal length)
-// rTan: radius along the tangential axis (petal width)
-function drawBlob(fc, x, y, angle, rRad, rTan, hue, sat, lit, alpha) {
-  fc.save();
-  fc.translate(x, y);
-  fc.rotate(angle);
-  // Gradient with held opacity core → sharper falloff for petal definition
-  const g = fc.createRadialGradient(0, 0, 0, 0, 0, 1);
-  g.addColorStop(0,    `hsla(${hue | 0},${sat}%,${lit}%,${alpha})`);
-  g.addColorStop(0.30, `hsla(${hue | 0},${sat}%,${lit}%,${alpha * 0.90})`);
-  g.addColorStop(0.55, `hsla(${hue | 0},${sat}%,${lit}%,${alpha * 0.50})`);
-  g.addColorStop(0.78, `hsla(${hue | 0},${sat}%,${lit}%,${alpha * 0.12})`);
-  g.addColorStop(1,    `hsla(${hue | 0},${sat}%,${lit}%,0)`);
-  fc.scale(rTan, rRad);  // x=tangential width, y=radial height
-  fc.beginPath();
-  fc.arc(0, 0, 1, 0, Math.PI * 2);
-  fc.fillStyle = g;
-  fc.fill();
-  fc.restore();
+function draw() {
+  let panelEl = document.getElementById('panel');
+  let pH = panelEl ? panelEl.offsetHeight : 0;
+  let visH = height - pH;
+  let cx = width / 2;
+  let cy = visH / 2;
+  let halfSize = min(width, visH) * 0.42;
+  let time = millis() / 1000;
+
+  // Cream background
+  background(40, 8, 92);
+
+  // Advance animation and get display state
+  let dt = min(deltaTime / 1000, 0.1); // Clamp to avoid jumps when tab is backgrounded
+  let st = getDisplayState(dt);
+
+  // Draw flower centered above panel
+  push();
+  translate(cx, cy);
+  renderFlower(st, halfSize, time);
+  pop();
+
+  // Paper texture overlay â€” multiply at low opacity for grain
+  drawingContext.globalCompositeOperation = 'multiply';
+  drawingContext.globalAlpha = 0.06;
+  drawingContext.drawImage(paperGfx.elt, 0, 0, width, height);
+  drawingContext.globalCompositeOperation = 'source-over';
+  drawingContext.globalAlpha = 1.0;
+
+  // Status text
+  updateStatusText();
 }
 
-// ── Draw entire flower to a context ──────────────────────
-// st: display state (may be interpolated / breathing-adjusted)
-// cx, cy: center in pixels
-// halfSize: reference radius (half the smaller canvas dimension)
-// t: global time in seconds (for breathing)
-// seed: PRNG seed for organic jitter
-function drawFlower(fc, st, cx, cy, halfSize, t, seed) {
-  const { count, reach, spread, petalHue, gapHue, centerHue, twist } = st;
-  const totalR = reach * halfSize;
-  const N      = Math.max(2, Math.round(count));
-  const twistR = (twist || 0) * Math.PI / 180;
-  const rng    = mulberry32(seed);
-
-  // Petal blob dimensions — more elongated for petal-like silhouette
-  const petalRad = totalR * 0.62;
-  const petalTan = totalR * (0.10 + spread * 0.24);
-
-  // Gap blob dimensions
-  const gapRad   = totalR * 0.28;
-  const gapTan   = totalR * (0.22 + spread * 0.16);
-
-  // Radial center distances — push petals further out from center
-  const petalDist = totalR * 0.52;
-  const gapDist   = totalR * 0.36;
-
-  // Spine blob dimensions — narrow high-opacity vein per petal
-  const spineRad = totalR * 0.48;
-  const spineTan = totalR * (0.03 + spread * 0.05);
-
-  // ── Gap blobs (between petals) ──
-  for (let i = 0; i < N; i++) {
-    const angle   = twistR + (i + 0.5) * (Math.PI * 2 / N);
-    const bi      = (i + N) % 30;
-    const breathe = Math.sin(t / BREATHE[bi].period + BREATHE[bi].phase) * 0.04;
-    const jitter  = (rng() - 0.5) * 0.06;
-    const dist    = gapDist * (1 + breathe + jitter);
-    const bx = cx + dist * Math.cos(angle);
-    const by = cy + dist * Math.sin(angle);
-    const rJit = 0.88 + rng() * 0.24;
-    drawBlob(fc, bx, by, angle,
-      gapRad * rJit, gapTan * rJit,
-      gapHue, 68, 67, 0.52 + rng() * 0.10);
-  }
-
-  // ── Petal blobs ──
-  for (let i = 0; i < N; i++) {
-    const angle   = twistR + i * (Math.PI * 2 / N);
-    const bi      = i % 30;
-    const breathe = Math.sin(t / BREATHE[bi].period + BREATHE[bi].phase) * 0.04;
-    const jitter  = (rng() - 0.5) * 0.06;
-    const dist    = petalDist * (1 + breathe + jitter);
-    const bx = cx + dist * Math.cos(angle);
-    const by = cy + dist * Math.sin(angle);
-    const rJit = 0.88 + rng() * 0.24;
-    drawBlob(fc, bx, by, angle,
-      petalRad * rJit, petalTan * rJit,
-      petalHue, 72, 64, 0.68 + rng() * 0.10);
-  }
-
-  // ── Spine blobs (narrow vein per petal for definition) ──
-  for (let i = 0; i < N; i++) {
-    const angle   = twistR + i * (Math.PI * 2 / N);
-    const bi      = i % 30;
-    const breathe = Math.sin(t / BREATHE[bi].period + BREATHE[bi].phase) * 0.04;
-    const dist    = petalDist * (1 + breathe) * 0.95;
-    const bx = cx + dist * Math.cos(angle);
-    const by = cy + dist * Math.sin(angle);
-    drawBlob(fc, bx, by, angle,
-      spineRad, spineTan,
-      petalHue, 80, 56, 0.45);
-  }
-
-  // ── Center glow (pre-blur layer) ──
-  const cbreathe = Math.sin(t / 2.0 + 1.1) * 0.08;
-  const centerR  = totalR * (0.30 + cbreathe);
-  const cg = fc.createRadialGradient(cx, cy, 0, cx, cy, centerR);
-  cg.addColorStop(0,    `hsla(${centerHue | 0}, 78%, 74%, 0.92)`);
-  cg.addColorStop(0.35, `hsla(${centerHue | 0}, 75%, 70%, 0.60)`);
-  cg.addColorStop(0.75, `hsla(${centerHue | 0}, 70%, 67%, 0.20)`);
-  cg.addColorStop(1,    `hsla(${centerHue | 0}, 65%, 65%, 0)`);
-  fc.beginPath();
-  fc.arc(cx, cy, centerR, 0, Math.PI * 2);
-  fc.fillStyle = cg;
-  fc.fill();
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  // Re-create paper texture at new dimensions (p5.Graphics can't resize)
+  paperGfx.remove();
+  paperGfx = createGraphics(width, height);
+  paperGfx.pixelDensity(1);
+  generatePaperTexture();
+  renderAllThumbs();
 }
 
-// ── Transition reach curve (coil → burst → settle) ───────
-function reachBurst(t, pulse) {
-  if (t < 0.15) {
-    // Coil: slight inhale
-    return 1 - easeIn(t / 0.15) * 0.05;
-  } else if (t < 0.40) {
-    // Burst: expand past target
-    const s = (t - 0.15) / 0.25;
-    return lerp(0.95, 1 + pulse * 0.28, easeIn(s));
-  } else {
-    // Settle: ease to target
-    const s = (t - 0.40) / 0.60;
-    return lerp(1 + pulse * 0.28, 1.0, easeOut(s));
-  }
-}
+// â”€â”€ Display State Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Determines what the flower shows this frame.
+// Editing: shows the state being edited.
+// Paused: shows the settled state.
+// Playing: cycles A â†’ B â†’ C â†’ A with smooth transitions.
 
-// ── Interpolate between two states ───────────────────────
-function interpStates(from, to, t, pulse) {
-  const st  = easeInOut(t);  // smooth progress for most params
-  const bst = reachBurst(t, pulse);
-  return {
-    count:     lerp(from.count,  to.count,  st),
-    reach:     lerp(from.reach,  to.reach,  st) * bst,
-    spread:    lerp(from.spread, to.spread, st),
-    twist:     lerp(from.twist,  to.twist,  st),
-    petalHue:  lerpHue(from.petalHue,  to.petalHue,  st),
-    gapHue:    lerpHue(from.gapHue,    to.gapHue,    st),
-    centerHue: lerpHue(from.centerHue, to.centerHue, st),
-  };
-}
-
-// ── Render one frame ──────────────────────────────────────
-function renderFrame(st) {
-  const W      = canvas.width;
-  const H      = canvas.height;
-  const panelPx = panelH * DPR;
-  const visH   = H - panelPx;
-  const cx     = W / 2;
-  const cy     = visH / 2;
-  const half   = Math.min(W, visH) * 0.5 * 0.88;
-  const blurPx = globals.blur * half * 2;
-
-  // 1. Draw flower to offscreen (no filter yet)
-  offCtx.fillStyle = '#EAE4D8';
-  offCtx.fillRect(0, 0, W, H);
-  drawFlower(offCtx, st, cx, cy, half, globalTime, loopSeed);
-
-  // 2. Composite offscreen → main canvas with single blur pass
-  ctx.fillStyle = '#EAE4D8';
-  ctx.fillRect(0, 0, W, H);
-  ctx.filter = `blur(${blurPx}px)`;
-  ctx.drawImage(offscreen, 0, 0);
-  ctx.filter = 'none';
-
-  // 3. Post-blur center glow — stays crisper than the blurred layer
-  const cbreathe = Math.sin(globalTime / 2.0 + 1.1) * 0.08;
-  const crH      = st.centerHue | 0;
-  const crR      = st.reach * half * (0.18 + cbreathe);
-  const cg2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, crR);
-  cg2.addColorStop(0,   `hsla(${crH}, 82%, 78%, 0.55)`);
-  cg2.addColorStop(0.5, `hsla(${crH}, 76%, 72%, 0.18)`);
-  cg2.addColorStop(1,   `hsla(${crH}, 70%, 68%, 0)`);
-  ctx.beginPath();
-  ctx.arc(cx, cy, crR, 0, Math.PI * 2);
-  ctx.fillStyle = cg2;
-  ctx.fill();
-
-  // 4. Paper texture overlay (multiply, very low opacity)
-  if (textureCanvas) {
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.globalAlpha = 0.07;
-    ctx.drawImage(textureCanvas, 0, 0);
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
-  }
-}
-
-// ── Render thumbnail for a state card ────────────────────
-function renderThumb(idx) {
-  const thumb = document.querySelectorAll('.thumb')[idx];
-  const tw    = thumb.width;
-  const th    = thumb.height;
-  const tc    = thumb.getContext('2d');
-  const half  = Math.min(tw, th) * 0.40;
-  const cx    = tw / 2;
-  const cy    = th / 2;
-  const blurPx = globals.blur * half * 1.8;
-
-  // Draw to a temp canvas then blur-composite to thumb
-  const tmp     = document.createElement('canvas');
-  tmp.width     = tw; tmp.height = th;
-  const tmpCtx  = tmp.getContext('2d');
-  tmpCtx.fillStyle = '#EAE4D8';
-  tmpCtx.fillRect(0, 0, tw, th);
-  drawFlower(tmpCtx, states[idx], cx, cy, half, 0, idx * 1000);
-
-  tc.fillStyle = '#EAE4D8';
-  tc.fillRect(0, 0, tw, th);
-  tc.filter = `blur(${blurPx}px)`;
-  tc.drawImage(tmp, 0, 0);
-  tc.filter = 'none';
-}
-
-function renderAllThumbs() {
-  for (let i = 0; i < 3; i++) renderThumb(i);
-}
-
-// ── Main loop ─────────────────────────────────────────────
-function tick(timestamp) {
-  requestAnimationFrame(tick);
-
-  if (lastTime === null) lastTime = timestamp;
-  const dt = Math.min((timestamp - lastTime) / 1000, 0.10);
-  lastTime    = timestamp;
-  globalTime  = timestamp / 1000;
-
-  let displayState;
-
-  if (!isPlaying) {
-    renderFrame(states[animIdx]);
-    return;
-  }
+function getDisplayState(dt) {
+  if (isEditing)  return states[activeTab];
+  if (!isPlaying) return states[activeTab]; // When paused, show whichever tab is selected
 
   if (animPhase === 'settling') {
-    dwellElapsed += dt * globals.tempo;
-    displayState = states[animIdx];
+    dwellElapsed += dt;
     if (dwellElapsed >= dwellTime) {
       animPhase    = 'transitioning';
       transitionT  = 0;
       dwellElapsed = 0;
-      // Seed stays constant — changing it caused visible blob-position pops
     }
-    updateStatus(`settled · ${'ABC'[animIdx]}`);
-  } else {
-    transitionT += dt * globals.tempo / TRANS_DUR;
-    if (transitionT >= 1) {
-      transitionT = 1;
-      animIdx     = (animIdx + 1) % 3;
-      animPhase   = 'settling';
-      dwellTime   = 6 + Math.random() * 4;
-      updateStatus(`settled · ${'ABC'[animIdx]}`);
-    } else {
-      updateStatus(`→ ${'BCA'[animIdx]}`);
-    }
-    displayState = interpStates(
-      states[animIdx],
-      states[(animIdx + 1) % 3],
-      transitionT,
-      globals.pulse
+    return states[animIdx];
+  }
+
+  // Transitioning between states
+  transitionT += dt / TRANS_DUR;
+  if (transitionT >= 1) {
+    transitionT  = 0;
+    animIdx      = (animIdx + 1) % 3;
+    animPhase    = 'settling';
+    dwellTime    = 5 + random(3);
+    return states[animIdx];
+  }
+  return lerpState(
+    states[animIdx],
+    states[(animIdx + 1) % 3],
+    transitionT
+  );
+}
+
+// â”€â”€ State Interpolation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function lerpState(a, b, t) {
+  let et = easeInOutCubic(t);
+  return {
+    count:     lerp(a.count,     b.count,     et),
+    reach:     lerp(a.reach,     b.reach,     et),
+    spread:    lerp(a.spread,    b.spread,    et),
+    twist:     lerpAngleDeg(a.twist, b.twist, et),
+    petalHue:  lerpHue360(a.petalHue,  b.petalHue,  et),
+    gapHue:    lerpHue360(a.gapHue,    b.gapHue,    et),
+    centerHue: lerpHue360(a.centerHue, b.centerHue, et),
+  };
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
+}
+
+function lerpHue360(a, b, t) {
+  let d = ((b - a) % 360 + 360) % 360;
+  if (d > 180) d -= 360;
+  return ((a + d * t) % 360 + 360) % 360;
+}
+
+function lerpAngleDeg(a, b, t) {
+  let d = ((b - a) % 360 + 360) % 360;
+  if (d > 180) d -= 360;
+  return a + d * t;
+}
+
+// â”€â”€ Flower Rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Three concentric petal rings + center bloom.
+// All variation driven by noise(index) â€” stable across
+// parameter changes, no sequential PRNG cascade.
+
+function renderFlower(st, halfSize, time) {
+  let N        = max(3, round(st.count));
+  let petalLen = st.reach * halfSize;
+  let petalWid = petalLen * (0.18 + st.spread * 0.32);
+  let twistRad = radians(st.twist);
+
+  // Continuous ambient animation (always alive, even when paused)
+  let breathe    = 1 + (noise(time * 0.32) - 0.5) * 0.10;
+  let drift      = (noise(time * 0.08 + 100) - 0.5) * 0.04;
+  let slowRotate = time * 0.015; // Very slow continuous rotation (~67s per revolution)
+
+  noStroke();
+
+  // 1. Background wash â€” soft halo behind everything
+  for (let i = 3; i >= 0; i--) {
+    let wr = petalLen * 1.1 * breathe * (1 + i * 0.15);
+    fill(st.petalHue, 35, 78, 5 + i);
+    ellipse(0, 0, wr * 2, wr * 2);
+  }
+
+  // 2. Gap petals â€” between main petals, shorter, different hue
+  for (let i = 0; i < N; i++) {
+    let angle   = twistRad + drift + slowRotate + TWO_PI / N * (i + 0.5);
+    let flutter = (noise(i * 0.6 + 50, time * 0.18) - 0.5) * 0.06;
+    let lenVar  = 1 + (noise(i * 0.4 + 70, time * 0.12) - 0.5) * 0.10;
+    drawPetal(
+      angle + flutter,
+      petalLen * 0.52 * breathe * lenVar,
+      petalWid * 0.55,
+      st.gapHue, i + 100, time, false
     );
   }
 
-  renderFrame(displayState);
+  // 3. Main petals â€” primary visual layer
+  for (let i = 0; i < N; i++) {
+    let angle   = twistRad + drift + slowRotate + TWO_PI / N * i;
+    let flutter = (noise(i * 0.6, time * 0.18) - 0.5) * 0.04;
+    let lenVar  = 1 + (noise(i * 0.4, time * 0.12) - 0.5) * 0.08;
+    drawPetal(
+      angle + flutter,
+      petalLen * breathe * lenVar,
+      petalWid,
+      st.petalHue, i, time, true
+    );
+  }
+
+  // 4. Inner accent petals â€” rotated half-step, smaller
+  for (let i = 0; i < N; i++) {
+    let angle   = twistRad + drift + slowRotate + TWO_PI / N * i + PI / N;
+    let flutter = (noise(i * 0.6 + 30, time * 0.22) - 0.5) * 0.03;
+    drawPetal(
+      angle + flutter,
+      petalLen * 0.35 * breathe,
+      petalWid * 0.40,
+      (st.petalHue + 15) % 360, i + 200, time, false
+    );
+  }
+
+  // 5. Center bloom
+  drawCenterBloom(st.centerHue, petalLen * 0.14 * breathe, time);
 }
 
-function updateStatus(txt) {
+// â”€â”€ Individual Petal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Each petal is drawn as 3 layered bezier shapes:
+//   1. Soft wash (larger, faint) with shadow glow
+//   2. Main body (medium alpha, rich color)
+//   3. Dark vein (narrow, high contrast)
+// Per-petal variation uses noise(index) â€” stable, no cascade.
+
+function drawPetal(angle, len, wid, hue, noiseIdx, time, useShadow) {
+  push();
+  rotate(angle);
+
+  // Per-petal flutter from noise (time-varying, gentle)
+  let flutter = (noise(noiseIdx * 0.5, time * 0.2) - 0.5) * 0.03;
+  rotate(flutter);
+
+  // Stable per-petal shape variation (not time-dependent)
+  let tipSkew = (noise(noiseIdx * 0.7 + 200) - 0.5) * wid * 0.18;
+  let asymR   = 0.43 + noise(noiseIdx * 0.7 + 300) * 0.12;
+  let asymL   = 0.43 + noise(noiseIdx * 0.7 + 400) * 0.12;
+
+  // Per-petal hue shift â€” golden angle spread, stable across count changes
+  let h = (hue + sin(noiseIdx * 2.399) * 10 + 360) % 360;
+
+  noStroke();
+
+  // Layer 1: Shadow glow for watercolor bleed (main petals only)
+  if (useShadow) {
+    drawingContext.shadowBlur  = len * 0.12;
+    drawingContext.shadowColor = 'hsla(' + round(h) + ', 55%, 55%, 0.2)';
+  }
+
+  // Soft wash â€” larger, fainter
+  fill(h, 55, 72, 22);
+  petalBezier(len * 1.06, wid * 1.10, tipSkew * 0.7, asymR, asymL);
+
+  // Turn off shadow for subsequent layers
+  if (useShadow) {
+    drawingContext.shadowBlur  = 0;
+    drawingContext.shadowColor = 'transparent';
+  }
+
+  // Layer 2: Main petal body â€” rich, visible
+  fill(h, 82, 56, 60);
+  petalBezier(len, wid, tipSkew, asymR, asymL);
+
+  // Layer 3: Dark vein â€” narrow, high contrast
+  fill(h, 90, 36, 40);
+  petalBezier(len * 0.78, wid * 0.18, tipSkew * 0.2, 0.50, 0.50);
+
+  pop();
+}
+
+// â”€â”€ Petal Bezier Shape â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Creates a teardrop/petal shape using two bezier curves.
+// Base at origin, tip at (tipSkew, -len).
+// asymR/asymL control the widest point on each side.
+
+function petalBezier(len, wid, tipSkew, asymR, asymL) {
+  beginShape();
+  vertex(0, 0);
+  // Right side: curves outward then narrows to tip
+  bezierVertex(
+    wid * asymR,  -len * 0.20,
+    wid * 0.52,   -len * 0.58,
+    tipSkew,      -len
+  );
+  // Left side: mirrors back to base
+  bezierVertex(
+    -wid * asymL, -len * 0.58,
+    -wid * 0.40,  -len * 0.20,
+    0,            0
+  );
+  endShape(CLOSE);
+}
+
+// â”€â”€ Center Bloom â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Bright concentric rings at the flower's center.
+
+function drawCenterBloom(hue, radius, time) {
+  let breathe = 1 + sin(time * 0.8) * 0.05;
+  let r = radius * breathe;
+  noStroke();
+  for (let i = 5; i >= 0; i--) {
+    let t  = i / 5;
+    let cr = r * (1 + t * 0.8);
+    fill(hue, 80 - i * 8, 82 + i * 3, 55 - i * 7);
+    ellipse(0, 0, cr * 2, cr * 2);
+  }
+}
+
+// â”€â”€ Status Text â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function updateStatusText() {
+  let txt;
+  if (isEditing)                     txt = 'editing \u00b7 ' + 'ABC'[activeTab];
+  else if (animPhase === 'settling') txt = 'settled \u00b7 ' + 'ABC'[animIdx];
+  else                               txt = '\u2192 ' + 'BCA'[animIdx];
   document.getElementById('status').textContent = txt;
 }
 
-// ── Slider fill ───────────────────────────────────────────
+// â”€â”€ Slider Fill Styling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 function setFill(el) {
-  const pct = ((parseFloat(el.value) - parseFloat(el.min)) /
-               (parseFloat(el.max)  - parseFloat(el.min)) * 100).toFixed(1) + '%';
+  let pct = ((parseFloat(el.value) - parseFloat(el.min)) /
+             (parseFloat(el.max)  - parseFloat(el.min)) * 100).toFixed(1) + '%';
   el.style.setProperty('--fill', pct);
 }
 
-// ── Sync all per-state sliders to a state ─────────────────
+// â”€â”€ Sync Sliders to a State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 function syncToState(idx) {
-  const s = states[idx];
+  let s = states[idx];
   [
-    ['s-count',  s.count,  'v-count',  v => `${Math.round(v)}`],
+    ['s-count',  s.count,  'v-count',  v => '' + Math.round(v)],
     ['s-reach',  s.reach,  'v-reach',  v => v.toFixed(2)],
     ['s-spread', s.spread, 'v-spread', v => v.toFixed(2)],
-    ['s-twist',  s.twist,  'v-twist',  v => `${Math.round(v)}°`],
+    ['s-twist',  s.twist,  'v-twist',  v => Math.round(v) + '\u00b0'],
   ].forEach(([id, val, vid, fmt]) => {
-    const el = document.getElementById(id);
+    let el = document.getElementById(id);
     el.value = val;
     setFill(el);
     document.getElementById(vid).textContent = fmt(val);
   });
 }
 
-// ── Build palette swatches ────────────────────────────────
+// â”€â”€ Build Palette Swatches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 function buildSwatches() {
-  const container = document.getElementById('swatches');
+  let container = document.getElementById('swatches');
   PALETTES.forEach((pal, i) => {
-    const btn = document.createElement('button');
+    let btn = document.createElement('button');
     btn.className   = 'swatch-btn';
     btn.title       = pal.name;
     btn.dataset.idx = i;
     [pal.p, pal.g, pal.c].forEach(hue => {
-      const dot = document.createElement('span');
+      let dot = document.createElement('span');
       dot.className = 'swatch-dot';
-      dot.style.background = `hsl(${hue}, 68%, 65%)`;
+      dot.style.background = 'hsl(' + hue + ', 68%, 65%)';
       btn.appendChild(dot);
     });
     btn.addEventListener('click', () => {
-      const s = states[activeTab];
+      let s = states[activeTab];
       s.petalHue = pal.p; s.gapHue = pal.g; s.centerHue = pal.c;
       document.querySelectorAll('.swatch-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      renderThumb(activeTab);
+      startEditing();
+      scheduleThumbRender(activeTab);
     });
     container.appendChild(btn);
   });
 }
 
-// ── Wire up everything ────────────────────────────────────
-function init() {
-  resize();
-  window.addEventListener('resize', () => { resize(); renderAllThumbs(); });
+// â”€â”€ Thumbnail Rendering (vanilla Canvas 2D, fast) â”€â”€â”€â”€â”€â”€â”€â”€
+// Uses native canvas API for speed â€” no p5.js overhead.
+// Draws simplified single-layer bezier petals.
 
+function renderThumb(idx) {
+  let thumb = document.querySelectorAll('.thumb')[idx];
+  let tc = thumb.getContext('2d');
+  let tw = thumb.width, th = thumb.height;
+  let cx = tw / 2, cy = th / 2;
+  let half = Math.min(tw, th) * 0.38;
+  let st = states[idx];
+  let N = Math.max(3, Math.round(st.count));
+  let pLen = st.reach * half;
+  let pWid = pLen * (0.18 + st.spread * 0.32);
+  let twistRad = st.twist * Math.PI / 180;
+
+  tc.fillStyle = '#EAE4D8';
+  tc.fillRect(0, 0, tw, th);
+
+  // Simplified petals â€” single layer, no noise
+  for (let i = 0; i < N; i++) {
+    let angle = twistRad + (Math.PI * 2 / N) * i;
+    tc.save();
+    tc.translate(cx, cy);
+    tc.rotate(angle);
+    tc.beginPath();
+    tc.moveTo(0, 0);
+    tc.bezierCurveTo(
+      pWid * 0.45, -pLen * 0.20,
+      pWid * 0.50, -pLen * 0.58,
+      0,           -pLen
+    );
+    tc.bezierCurveTo(
+      -pWid * 0.48, -pLen * 0.58,
+      -pWid * 0.42, -pLen * 0.20,
+      0,            0
+    );
+    tc.closePath();
+    tc.fillStyle = 'hsla(' + st.petalHue + ', 78%, 50%, 0.65)';
+    tc.fill();
+    tc.restore();
+  }
+
+  // Center dot
+  tc.beginPath();
+  tc.arc(cx, cy, pLen * 0.10, 0, Math.PI * 2);
+  tc.fillStyle = 'hsl(' + st.centerHue + ', 78%, 70%)';
+  tc.fill();
+}
+
+let _thumbTimer = null;
+function scheduleThumbRender(idx) {
+  if (_thumbTimer) cancelAnimationFrame(_thumbTimer);
+  _thumbTimer = requestAnimationFrame(() => {
+    renderThumb(idx);
+    _thumbTimer = null;
+  });
+}
+
+function renderAllThumbs() {
+  for (let i = 0; i < 3; i++) renderThumb(i);
+}
+
+// â”€â”€ Initialize UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function initUI() {
   buildSwatches();
 
   // State tabs
@@ -822,56 +862,35 @@ function init() {
     });
   });
 
-  // Per-state sliders
+  // Per-state sliders â€” updates go straight to the state object
   [
-    { id: 's-count',  key: 'count',  vid: 'v-count',  fmt: v => `${Math.round(v)}` },
+    { id: 's-count',  key: 'count',  vid: 'v-count',  fmt: v => '' + Math.round(v) },
     { id: 's-reach',  key: 'reach',  vid: 'v-reach',  fmt: v => v.toFixed(2) },
-    { id: 's-spread', key: 'spread', vid: 'v-spread',  fmt: v => v.toFixed(2) },
-    { id: 's-twist',  key: 'twist',  vid: 'v-twist',   fmt: v => `${Math.round(v)}°` },
+    { id: 's-spread', key: 'spread', vid: 'v-spread', fmt: v => v.toFixed(2) },
+    { id: 's-twist',  key: 'twist',  vid: 'v-twist',  fmt: v => Math.round(v) + '\u00b0' },
   ].forEach(({ id, key, vid, fmt }) => {
-    const el = document.getElementById(id);
+    let el = document.getElementById(id);
     setFill(el);
     el.addEventListener('input', () => {
-      const val = parseFloat(el.value);
+      let val = parseFloat(el.value);
       states[activeTab][key] = val;
       document.getElementById(vid).textContent = fmt(val);
       setFill(el);
-      renderThumb(activeTab);
+      startEditing();
+      scheduleThumbRender(activeTab);
     });
   });
 
-  // Global sliders
-  [
-    { id: 'g-blur',  key: 'blur',  vid: 'v-blur',  fmt: v => v.toFixed(3) },
-    { id: 'g-tempo', key: 'tempo', vid: 'v-tempo', fmt: v => `${v.toFixed(2)}×` },
-    { id: 'g-pulse', key: 'pulse', vid: 'v-pulse', fmt: v => v.toFixed(2) },
-  ].forEach(({ id, key, vid, fmt }) => {
-    const el = document.getElementById(id);
-    el.value = globals[key];
-    setFill(el);
-    document.getElementById(vid).textContent = fmt(globals[key]);
-    el.addEventListener('input', () => {
-      const val = parseFloat(el.value);
-      globals[key] = val;
-      document.getElementById(vid).textContent = fmt(val);
-      setFill(el);
-    });
-  });
-
-  // Play / pause
-  const btnPlay = document.getElementById('btn-play');
+  // Play / pause â€” â–¶ when paused, â€– when playing
+  let btnPlay = document.getElementById('btn-play');
   btnPlay.addEventListener('click', () => {
     isPlaying = !isPlaying;
-    btnPlay.innerHTML = isPlaying ? '&#9654;' : '&#9646;&#9646;';
-    lastTime = null;
+    btnPlay.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
   });
 
   syncToState(0);
   renderAllThumbs();
-  requestAnimationFrame(tick);
 }
-
-init();
 </script>
 </body>
 </html>
