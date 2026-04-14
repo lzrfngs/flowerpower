@@ -137,6 +137,14 @@ input[type=range]::-moz-range-thumb {
     </div>
   </div>
   <div class="hue-dot" id="hue-preview"></div>
+  <div style="display:flex;gap:3px;align-self:flex-end;margin-bottom:1px">
+    <button class="lfo-btn" id="fx-solar" title="Solarize">&bull;</button>
+    <button class="lfo-btn" id="fx-irid" title="Iridescence">&bull;</button>
+    <button class="lfo-btn" id="fx-accent" title="Accent">&bull;</button>
+    <button class="lfo-btn" id="fx-capillary" title="Capillary">&bull;</button>
+    <button class="lfo-btn" id="fx-granulation" title="Granulation">&bull;</button>
+    <button class="lfo-btn" id="fx-dispersion" title="Dispersion">&bull;</button>
+  </div>
   <button id="btn-pause" title="Play">&#9654;</button>
 </div>
 
@@ -178,6 +186,14 @@ uniform float uTime;
 uniform vec3 uPetalColor;
 uniform vec3 uGapColor;
 uniform vec3 uPaperColor;
+
+// FX toggles (0.0 = off, 1.0 = on)
+uniform float uFxSolar;
+uniform float uFxIrid;
+uniform float uFxAccent;
+uniform float uFxCapillary;
+uniform float uFxGranulation;
+uniform float uFxDispersion;
 
 // Proper hue rotation in RGB space (rotation around the (1,1,1) axis)
 vec3 rotateHue(vec3 col, float angle) {
@@ -363,6 +379,19 @@ void main() {
   vec3 gapDark = rotateHue(uGapColor, 0.35) * 0.30; // warm-shifted dark
   gapCol = mix(gapDark, gapCol, gapEdgeDarken);
   gapCol = clamp(gapCol, 0.0, 1.0);
+  // ── Capillary action: warm wicks outward, cool pools inward ──
+  if (uFxCapillary > 0.5) {
+    float capillary = smoothstep(0.2, 0.9, petalMask);
+    vec3 warmPull = rotateHue(petalCol, -0.4) * 1.2;
+    vec3 coolPool = rotateHue(petalCol, 0.5) * 0.75;
+    petalCol = mix(mix(coolPool, petalCol, capillary), warmPull, (1.0 - capillary) * 0.45);
+    // Same for gaps
+    float gapCap = smoothstep(0.2, 0.9, gapMask);
+    vec3 gapWarm = rotateHue(gapCol, -0.3) * 1.15;
+    vec3 gapCool = rotateHue(gapCol, 0.4) * 0.8;
+    gapCol = mix(mix(gapCool, gapCol, gapCap), gapWarm, (1.0 - gapCap) * 0.4);
+  }
+
   color = mix(color, gapCol, gapAlpha);
 
   // Petal color with edge darkening + hue shift
@@ -412,34 +441,48 @@ void main() {
   color *= 1.0 - grain * 0.15 * paintPresence;
 
   // ── Solarization ──
-  float lum = dot(color, vec3(0.299, 0.587, 0.114));
-  float solarMask = sin(lum * 3.14159) * paintPresence;
-  vec3 solarized = rotateHue(1.0 - color, 0.5);
-  color = mix(color, solarized, solarMask * 0.15);
+  if (uFxSolar > 0.5) {
+    float lum = dot(color, vec3(0.299, 0.587, 0.114));
+    float solarMask = sin(lum * 3.14159) * paintPresence;
+    vec3 solarized = rotateHue(1.0 - color, 0.5);
+    color = mix(color, solarized, solarMask * 0.15);
+  }
 
-  // ── Iridescence at edges (Mantle Creep) ──
-  // Edge gradient drives hue shift — thin-film shimmer at paint boundaries
-  float edgeMag = max(petalEdgeProximity, gapEdgeProximity);
-  float iridAngle = fbm(uv * 12.0 + uTime * 0.1) * 6.28;
-  float iridWeight = edgeMag * paintPresence * 0.6;
-  color = mix(color, rotateHue(color, iridAngle), iridWeight);
-  color += edgeMag * paintPresence * 0.03 * vec3(0.85, 0.92, 1.0);
+  // ── Iridescence at edges ──
+  if (uFxIrid > 0.5) {
+    float edgeMag = max(petalEdgeProximity, gapEdgeProximity);
+    float iridAngle = fbm(uv * 12.0 + uTime * 0.1) * 6.28;
+    float iridWeight = edgeMag * paintPresence * 0.6;
+    color = mix(color, rotateHue(color, iridAngle), iridWeight);
+    color += edgeMag * paintPresence * 0.03 * vec3(0.85, 0.92, 1.0);
+  }
 
-  // ── Accent patches (Mantle Creep) ──
-  // FBM blob field: organic patches of shifted accent color at transitions
-  float patchField = fbm(uv * 4.0 + uTime * 0.02 + vec2(50.0, 25.0));
-  float patchMask = smoothstep(0.48, 0.65, patchField) * paintPresence;
-  vec3 accentCol = rotateHue(uPetalColor, 1.5) * 0.9;
-  color = mix(color, accentCol, patchMask * edgeMag * 0.4);
+  // ── Accent patches ──
+  if (uFxAccent > 0.5) {
+    float edgeMag2 = max(petalEdgeProximity, gapEdgeProximity);
+    float patchField = fbm(uv * 4.0 + uTime * 0.02 + vec2(50.0, 25.0));
+    float patchMask = smoothstep(0.48, 0.65, patchField) * paintPresence;
+    vec3 accentCol = rotateHue(uPetalColor, 1.5) * 0.9;
+    color = mix(color, accentCol, patchMask * edgeMag2 * 0.4);
+  }
 
-  // ── Surface relief (Mantle Creep) ──
-  // Paint thickness as height map — specular highlight on pooled edges
-  float relief = max(petalShape, gapShape);
-  vec2 gradR = vec2(dFdx(relief), dFdy(relief));
-  vec3 surfNorm = normalize(vec3(-gradR * 8.0, 1.0));
-  vec3 lightDir = normalize(vec3(0.5, 0.3, 1.0));
-  float spec = pow(max(0.0, dot(surfNorm, lightDir)), 16.0);
-  color += spec * paintPresence * 0.12 * vec3(1.0, 0.97, 0.90);
+  // ── Pigment granulation ──
+  if (uFxGranulation > 0.5) {
+    float granulation = sin(uv.x * uResolution.x * 0.7) * sin(uv.y * uResolution.y * 0.7);
+    granulation *= fbm(uv * 35.0 + 300.0);
+    color = mix(color, color * (1.0 + vec3(granulation*0.15, -granulation*0.08, granulation*0.1)), paintPresence);
+  }
+
+  // ── Chromatic dispersion ──
+  // Must be last — operates on final composited color
+  if (uFxDispersion > 0.5) {
+    vec2 dispDir = uv - 0.5;
+    float dispStr = length(dispDir) * 0.006;
+    float dispR = texture2D(uShapeBuffer, uv + dispDir * dispStr).b;
+    float dispB = texture2D(uShapeBuffer, uv - dispDir * dispStr).b;
+    color.r = mix(color.r, color.r * (0.85 + step(0.3, dispR) * 0.3), paintPresence * 0.5);
+    color.b = mix(color.b, color.b * (0.85 + step(0.3, dispB) * 0.3), paintPresence * 0.5);
+  }
 
   gl_FragColor = vec4(color, 1.0);
 }
@@ -449,6 +492,12 @@ void main() {
 var params = {
   count: 7, width: 0.62, vary: 1.0, centerR: 0.10,
   hue: 42, gapHue: 195, seed: 12345, speed: 0.3
+};
+
+// FX toggles — all start off
+var fx = {
+  solar: 0, irid: 0, accent: 0,
+  capillary: 0, granulation: 0, dispersion: 0
 };
 
 var shapeBuffer = null;
@@ -738,6 +787,12 @@ function renderBurst() {
   watercolorShader.setUniform('uPetalColor', petalRgb);
   watercolorShader.setUniform('uGapColor', gapRgb);
   watercolorShader.setUniform('uPaperColor', [0.847, 0.816, 0.753]);
+  watercolorShader.setUniform('uFxSolar', fx.solar);
+  watercolorShader.setUniform('uFxIrid', fx.irid);
+  watercolorShader.setUniform('uFxAccent', fx.accent);
+  watercolorShader.setUniform('uFxCapillary', fx.capillary);
+  watercolorShader.setUniform('uFxGranulation', fx.granulation);
+  watercolorShader.setUniform('uFxDispersion', fx.dispersion);
 
   // Draw a full-screen plane to trigger the fragment shader
   noStroke();
@@ -880,6 +935,24 @@ function initUI() {
     }
   }
   lfoTick();
+
+  // FX toggle buttons
+  var fxButtons = [
+    { id: 'fx-solar', key: 'solar' },
+    { id: 'fx-irid', key: 'irid' },
+    { id: 'fx-accent', key: 'accent' },
+    { id: 'fx-capillary', key: 'capillary' },
+    { id: 'fx-granulation', key: 'granulation' },
+    { id: 'fx-dispersion', key: 'dispersion' }
+  ];
+  fxButtons.forEach(function(f) {
+    var btn = document.getElementById(f.id);
+    btn.addEventListener('click', function() {
+      fx[f.key] = fx[f.key] > 0.5 ? 0.0 : 1.0;
+      btn.classList.toggle('active', fx[f.key] > 0.5);
+      scheduleRender();
+    });
+  });
 
   updatePreviews();
 }
