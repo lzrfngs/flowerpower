@@ -256,6 +256,22 @@ void main() {
   float origPetal = step(0.7, orig.b);
   float origGap = step(0.3, orig.b) * (1.0 - step(0.7, orig.b));
 
+  // ── Film grain (Mantle Creep technique) ──
+  // Per-pixel noise concentrated at edges — perturbs the distance field
+  // before thresholding so it creates actual threshold crossings at
+  // the paint boundary. Peaks in the transition zone, quiet in solid
+  // areas and empty background.
+  float petalEdgeProximity = 4.0 * petalShape * (1.0 - petalShape); // peaks at 0.5
+  float gapEdgeProximity = 4.0 * gapShape * (1.0 - gapShape);
+  float grainNoise = hash(uv * uResolution + fract(uTime * 137.0)) - 0.5; // per-pixel, per-frame
+  float grainStrength = 0.12;
+  petalShape += grainNoise * grainStrength * petalEdgeProximity;
+  gapShape += grainNoise * grainStrength * gapEdgeProximity;
+
+  // Re-clamp after grain perturbation
+  petalShape = max(petalShape, 0.0);
+  gapShape = max(gapShape, 0.0);
+
   // ── Step 2: Domain-warped noise for organic edge variation ──
   // Two scales: large blowout zones + fine edge texture
   vec2 noiseUV = uv * 4.0 + uTime * 0.2;
