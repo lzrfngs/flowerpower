@@ -134,14 +134,22 @@ input[type=range]::-moz-range-thumb {
     </div>
   </div>
   <div class="hue-dot" id="hue-preview"></div>
-  <div style="display:flex;gap:3px;align-self:flex-end;margin-bottom:1px">
-    <button class="lfo-btn" id="fx-solar" title="Solarize">&bull;</button>
-    <button class="lfo-btn" id="fx-irid" title="Iridescence">&bull;</button>
-    <button class="lfo-btn" id="fx-accent" title="Accent">&bull;</button>
-    <button class="lfo-btn" id="fx-capillary" title="Capillary">&bull;</button>
-    <button class="lfo-btn" id="fx-granulation" title="Granulation">&bull;</button>
-    <button class="lfo-btn" id="fx-dispersion" title="Dispersion">&bull;</button>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Color Shift</span>
+    <div class="ctrl-with-val">
+      <input type="range" id="s-colorshift" min="0" max="1" step="0.01" value="0.3">
+      <span class="ctrl-val" id="v-colorshift">0.30</span>
+    </div>
   </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Radial Blur</span>
+    <div class="ctrl-with-val">
+      <input type="range" id="s-radblur" min="0" max="1" step="0.01" value="0.0">
+      <span class="ctrl-val" id="v-radblur">0.00</span>
+    </div>
+  </div>
+  <button class="lfo-btn" id="fx-irid" title="Iridescence" style="align-self:flex-end;margin-bottom:1px">&bull;</button>
+  <button class="lfo-btn" id="fx-capillary" title="Capillary" style="align-self:flex-end;margin-bottom:1px">&bull;</button>
 </div>
 
 <script>
@@ -183,13 +191,11 @@ uniform vec3 uPetalColor;
 uniform vec3 uGapColor;
 uniform vec3 uPaperColor;
 
-// FX toggles (0.0 = off, 1.0 = on)
-uniform float uFxSolar;
+// FX toggles + continuous params
 uniform float uFxIrid;
-uniform float uFxAccent;
 uniform float uFxCapillary;
-uniform float uFxGranulation;
-uniform float uFxDispersion;
+uniform float uColorShift;
+uniform float uRadialBlur;
 
 // Proper hue rotation in RGB space (rotation around the (1,1,1) axis)
 vec3 rotateHue(vec3 col, float angle) {
@@ -436,14 +442,6 @@ void main() {
   // Paper grain
   color *= 1.0 - grain * 0.15 * paintPresence;
 
-  // ── Solarization ──
-  if (uFxSolar > 0.5) {
-    float lum = dot(color, vec3(0.299, 0.587, 0.114));
-    float solarMask = sin(lum * 3.14159) * paintPresence;
-    vec3 solarized = rotateHue(1.0 - color, 0.5);
-    color = mix(color, solarized, solarMask * 0.15);
-  }
-
   // ── Iridescence at edges ──
   if (uFxIrid > 0.5) {
     float edgeMag = max(petalEdgeProximity, gapEdgeProximity);
@@ -453,31 +451,51 @@ void main() {
     color += edgeMag * paintPresence * 0.03 * vec3(0.85, 0.92, 1.0);
   }
 
-  // ── Accent patches ──
-  if (uFxAccent > 0.5) {
-    float edgeMag2 = max(petalEdgeProximity, gapEdgeProximity);
-    float patchField = fbm(uv * 4.0 + uTime * 0.02 + vec2(50.0, 25.0));
-    float patchMask = smoothstep(0.48, 0.65, patchField) * paintPresence;
-    vec3 accentCol = rotateHue(uPetalColor, 1.5) * 0.9;
-    color = mix(color, accentCol, patchMask * edgeMag2 * 0.4);
+  // ── Capillary — applied earlier in petal/gap color section ──
+
+  // ── Color Shift (continuous slider) ──
+  // Rotates hue, shifts saturation, warps brightness based on noise + slider
+  // At 0 = no effect. At 1 = dramatic psychedelic color warping.
+  if (uColorShift > 0.01) {
+    float cs = uColorShift;
+    // Domain-warped hue rotation — different areas shift differently
+    float hueWarp = fbm(uv * 5.0 + uTime * 0.15 + vec2(77.0, 33.0));
+    float hueAngle = (hueWarp - 0.5) * cs * 3.0; // up to ±1.5 radians at max
+    color = mix(color, rotateHue(color, hueAngle), paintPresence * cs);
+    // Brightness contrast boost
+    float lum = dot(color, vec3(0.299, 0.587, 0.114));
+    color = mix(color, color * (0.5 + lum * 1.5), cs * 0.4 * paintPresence);
+    // Saturation push — colors get more vivid
+    vec3 grey = vec3(lum);
+    color = mix(color, mix(grey, color, 1.0 + cs * 0.8), paintPresence);
   }
 
-  // ── Pigment granulation ──
-  if (uFxGranulation > 0.5) {
-    float granulation = sin(uv.x * uResolution.x * 0.7) * sin(uv.y * uResolution.y * 0.7);
-    granulation *= fbm(uv * 35.0 + 300.0);
-    color = mix(color, color * (1.0 + vec3(granulation*0.15, -granulation*0.08, granulation*0.1)), paintPresence);
-  }
-
-  // ── Chromatic dispersion ──
-  // Must be last — operates on final composited color
-  if (uFxDispersion > 0.5) {
-    vec2 dispDir = uv - 0.5;
-    float dispStr = length(dispDir) * 0.006;
-    float dispR = texture2D(uShapeBuffer, uv + dispDir * dispStr).b;
-    float dispB = texture2D(uShapeBuffer, uv - dispDir * dispStr).b;
-    color.r = mix(color.r, color.r * (0.85 + step(0.3, dispR) * 0.3), paintPresence * 0.5);
-    color.b = mix(color.b, color.b * (0.85 + step(0.3, dispB) * 0.3), paintPresence * 0.5);
+  // ── Radial Blur (continuous slider) ──
+  // Noise-masked outward radial smear. Only affects some areas.
+  // At 0 = no blur. At 1 = dramatic outward streaks.
+  if (uRadialBlur > 0.01) {
+    float rb = uRadialBlur;
+    vec2 radDir = uv - vec2(0.5);
+    float radDist = length(radDir);
+    vec2 radNorm = radDir / (radDist + 0.001);
+    // Noise mask — only blur some areas, leave others crisp
+    float blurMask = fbm(uv * 6.0 + uTime * 0.08 + vec2(22.0, 55.0));
+    blurMask = smoothstep(0.3, 0.7, blurMask) * paintPresence;
+    // Sample along radial direction
+    float blurAmt = rb * radDist * 0.04;
+    vec3 blurred = color;
+    float tw = 1.0;
+    for (int s = 1; s <= 6; s++) {
+      float sf = float(s) / 6.0;
+      vec2 sampleUV = uv - radNorm * blurAmt * sf;
+      vec4 sam = texture2D(uShapeBuffer, sampleUV);
+      float samShape = max(step(0.7, sam.b), step(0.3, sam.b) * (1.0 - step(0.7, sam.b)));
+      // Blend the final color from nearby positions (approximate)
+      blurred += color * (1.0 - sf * 0.3);
+      tw += 1.0;
+    }
+    blurred /= tw;
+    color = mix(color, blurred, blurMask * rb);
   }
 
   gl_FragColor = vec4(color, 1.0);
@@ -487,13 +505,13 @@ void main() {
 // ── Parameters ──
 var params = {
   count: 8, width: 0.62, vary: 1.0, centerR: 0.10,
-  hue: 42, gapHue: 195, seed: 12345, morphSpeed: 0.3
+  hue: 42, gapHue: 195, seed: 12345, morphSpeed: 0.3,
+  colorShift: 0.3, radialBlur: 0.0
 };
 
-// FX toggles — all start off
+// FX toggles
 var fx = {
-  solar: 0, irid: 0, accent: 0,
-  capillary: 0, granulation: 0, dispersion: 0
+  irid: 0, capillary: 0
 };
 
 var shapeBuffer = null;
@@ -741,12 +759,10 @@ function renderBurst() {
   watercolorShader.setUniform('uPetalColor', petalRgb);
   watercolorShader.setUniform('uGapColor', gapRgb);
   watercolorShader.setUniform('uPaperColor', [0.847, 0.816, 0.753]);
-  watercolorShader.setUniform('uFxSolar', fx.solar);
   watercolorShader.setUniform('uFxIrid', fx.irid);
-  watercolorShader.setUniform('uFxAccent', fx.accent);
   watercolorShader.setUniform('uFxCapillary', fx.capillary);
-  watercolorShader.setUniform('uFxGranulation', fx.granulation);
-  watercolorShader.setUniform('uFxDispersion', fx.dispersion);
+  watercolorShader.setUniform('uColorShift', params.colorShift);
+  watercolorShader.setUniform('uRadialBlur', params.radialBlur);
 
   // Draw a full-screen plane to trigger the fragment shader
   noStroke();
@@ -775,9 +791,11 @@ function scheduleRender() {
 
 function initUI() {
   var sliders = [
-    { id: 's-width',  key: 'width',   vid: 'v-width',  fmt: function(v){return v.toFixed(2);} },
-    { id: 's-center', key: 'centerR', vid: 'v-center', fmt: function(v){return v.toFixed(2);} },
-    { id: 's-hue',    key: 'hue',     vid: 'v-hue',    fmt: function(v){return ''+Math.round(v);}, parse: Math.round }
+    { id: 's-width',      key: 'width',      vid: 'v-width',      fmt: function(v){return v.toFixed(2);} },
+    { id: 's-center',     key: 'centerR',    vid: 'v-center',     fmt: function(v){return v.toFixed(2);} },
+    { id: 's-hue',        key: 'hue',        vid: 'v-hue',        fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
+    { id: 's-colorshift', key: 'colorShift', vid: 'v-colorshift', fmt: function(v){return v.toFixed(2);} },
+    { id: 's-radblur',    key: 'radialBlur', vid: 'v-radblur',    fmt: function(v){return v.toFixed(2);} }
   ];
 
   sliders.forEach(function(s) {
@@ -877,12 +895,8 @@ function initUI() {
 
   // FX toggle buttons
   var fxButtons = [
-    { id: 'fx-solar', key: 'solar' },
     { id: 'fx-irid', key: 'irid' },
-    { id: 'fx-accent', key: 'accent' },
-    { id: 'fx-capillary', key: 'capillary' },
-    { id: 'fx-granulation', key: 'granulation' },
-    { id: 'fx-dispersion', key: 'dispersion' }
+    { id: 'fx-capillary', key: 'capillary' }
   ];
   fxButtons.forEach(function(f) {
     var btn = document.getElementById(f.id);
