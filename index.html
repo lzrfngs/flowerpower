@@ -21,7 +21,6 @@ body {
 }
 canvas.p5Canvas {
   position: fixed !important; top: 0; left: 0; z-index: 0;
-  filter: blur(4px);
 }
 #reg-marks { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
 #reg-marks span {
@@ -66,13 +65,6 @@ input[type=range]::-moz-range-thumb {
   width: 2px; height: 11px; background: var(--accent);
   border-radius: 0; cursor: pointer; border: none;
 }
-#btn-seed {
-  width: 34px; height: 34px; background: var(--accent); color: var(--cream);
-  border: none; font-size: 14px; cursor: pointer; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0;
-  font-family: inherit; transition: opacity 0.12s; align-self: flex-end;
-}
-#btn-seed:hover { opacity: 0.75; }
 .hue-dot {
   width: 18px; height: 18px; border-radius: 50%;
   border: 1px solid var(--border); flex-shrink: 0;
@@ -126,18 +118,18 @@ input[type=range]::-moz-range-thumb {
 </div>
 
 <script>
-// Flower Power - p5.js radial burst
-// FILLED WEDGE approach: each petal is a solid polygon drawn multiple
-// times at low alpha with noise-distorted edges. No dots — inherently
-// smooth continuous tone. ~80 shape fills total vs thousands of ellipses.
+// Flower Power — Tyler Hobbs watercolor algorithm
+// Polygon subdivision with Gaussian displacement, stacked at low alpha.
+// ~40 transparent layers per shape, edges feather naturally.
+// No CSS blur needed — the technique IS the softness.
 
 var params = {
   count: 7, width: 0.62, vary: 0.50,
   hue: 42, gapHue: 195, seed: 12345
 };
 
-var gfx = null;       // persistent offscreen buffer for multiply blending
-var paperTex = null;   // pre-baked grain texture
+var gfx = null;
+var paperTex = null;
 var petalProps = [];
 var renderRAF = null;
 
@@ -149,12 +141,12 @@ function generatePetalProps() {
   var v = params.vary;
   for (var i = 0; i < N; i++) {
     petalProps.push({
-      lengthMult:  1.0 + (noise(i * 1.3 + 0)   - 0.5) * 0.6 * v,
-      widthMult:   1.0 + (noise(i * 1.3 + 50)  - 0.5) * 0.7 * v,
+      lengthMult:  1.0 + (noise(i * 1.3 + 0) - 0.5) * 0.6 * v,
+      widthMult:   1.0 + (noise(i * 1.3 + 50) - 0.5) * 0.7 * v,
       curvature:   (noise(i * 1.3 + 100) - 0.5) * 0.30 * v,
       angleDrift:  (noise(i * 1.3 + 200) - 0.5) * 0.15 * v,
-      edgeRough:   0.3 + noise(i * 1.3 + 250) * 0.7,  // how rough the edges are
-      taper:       0.15 + noise(i * 1.3 + 300) * 0.45, // tip width ratio
+      edgeRough:   0.4 + noise(i * 1.3 + 250) * 0.6,
+      taper:       0.08 + noise(i * 1.3 + 300) * 0.25,
     });
   }
 }
@@ -203,54 +195,48 @@ function windowResized() {
   renderBurst();
 }
 
-// -- Build a wedge polygon --
-// Returns an array of {x, y} points defining a petal/wedge shape.
-// The shape radiates from center: narrow at origin, widens, then
-// tapers to the tip. Noise distorts each vertex for organic edges.
-// edgeSegs: number of segments along each side of the wedge.
-function buildWedge(centerAngle, halfAngle, maxR, taper, curvature, edgeRough, nOff, layerSeed) {
-  var pts = [];
-  var segs = 28; // more segments for smooth spline curves
+// ── Polygon Subdivision (Tyler Hobbs technique) ──────────
+// Recursively subdivide each edge: find midpoint, displace it
+// with Gaussian random offset, recurse on children.
+// Variance shrinks per recursion level → fine detail near edges.
 
-  // Start at center
+function subdivideEdge(pts, x1, y1, x2, y2, depth, variance, vdiv) {
+  if (depth <= 0) {
+    pts.push({ x: x2, y: y2 });
+    return;
+  }
+  var mx = (x1 + x2) / 2 + randomGaussian() * variance;
+  var my = (y1 + y2) / 2 + randomGaussian() * variance;
+  subdivideEdge(pts, x1, y1, mx, my, depth - 1, variance / vdiv, vdiv);
+  subdivideEdge(pts, mx, my, x2, y2, depth - 1, variance / vdiv, vdiv);
+}
+
+function deformPolygon(poly, depth, variance, vdiv) {
+  var pts = [];
+  for (var i = 0; i < poly.length; i++) {
+    var curr = poly[i];
+    var next = poly[(i + 1) % poly.length];
+    pts.push({ x: curr.x, y: curr.y });
+    subdivideEdge(pts, curr.x, curr.y, next.x, next.y, depth, variance, vdiv);
+  }
+  return pts;
+}
+
+// ── Build a wedge base polygon ───────────────────────────
+// Returns a clean polygon (few vertices) defining the petal wedge.
+// This gets subdivided/deformed for each layer.
+
+function buildWedgeBase(centerAngle, halfAngle, maxR, taper, curvature) {
+  var pts = [];
+  var segs = 12;
+
+  // Center point
   pts.push({ x: 0, y: 0 });
 
-  // Right edge: center -> tip
-  for (var i = 0; i <= segs; i++) {
-    var t = i / segs; // 0 at center, 1 at tip
-    var r = maxR * t;
-
-    // Width profile: ease in, peak around 30%, then power-curve taper to pointed tip
-    var wFrac;
-    if (t < 0.30) {
-      // Smooth ease-in from center
-      var u = t / 0.30;
-      wFrac = u * u * (3 - 2 * u); // smoothstep
-    } else {
-      // Power curve to tip — drops to near-zero
-      var u = (t - 0.30) / 0.70;
-      wFrac = (1.0 - u * u) * (1.0 - u * taper);
-    }
-
-    // Curvature: angle bends outward
-    var bend = curvature * t * t;
-
-    // Noise distortion — amplified toward the tip for organic splay
-    var tipAmp = 1 + t * t * 2.5; // 1x at center, 3.5x at tip
-    var nR = (noise(nOff * 2 + layerSeed, i * 0.25, 0) - 0.5) * maxR * 0.14 * edgeRough * tipAmp;
-    var nA = (noise(nOff * 2 + layerSeed, i * 0.25, 10) - 0.5) * halfAngle * 0.30 * edgeRough * tipAmp;
-
-    var angle = centerAngle + bend + halfAngle * wFrac + nA;
-    var dist = r + nR;
-
-    pts.push({ x: cos(angle) * dist, y: sin(angle) * dist });
-  }
-
-  // Left edge: tip -> center (reverse direction)
-  for (var i = segs; i >= 0; i--) {
+  // Right edge
+  for (var i = 1; i <= segs; i++) {
     var t = i / segs;
     var r = maxR * t;
-
     var wFrac;
     if (t < 0.30) {
       var u = t / 0.30;
@@ -259,49 +245,53 @@ function buildWedge(centerAngle, halfAngle, maxR, taper, curvature, edgeRough, n
       var u = (t - 0.30) / 0.70;
       wFrac = (1.0 - u * u) * (1.0 - u * taper);
     }
-
     var bend = curvature * t * t;
-    var tipAmp = 1 + t * t * 2.5;
-    var nR = (noise(nOff * 2 + layerSeed, i * 0.25, 20) - 0.5) * maxR * 0.14 * edgeRough * tipAmp;
-    var nA = (noise(nOff * 2 + layerSeed, i * 0.25, 30) - 0.5) * halfAngle * 0.30 * edgeRough * tipAmp;
+    var angle = centerAngle + bend + halfAngle * wFrac;
+    pts.push({ x: cos(angle) * r, y: sin(angle) * r });
+  }
 
-    var angle = centerAngle + bend - halfAngle * wFrac + nA;
-    var dist = r + nR;
-
-    pts.push({ x: cos(angle) * dist, y: sin(angle) * dist });
+  // Left edge (reverse)
+  for (var i = segs; i >= 1; i--) {
+    var t = i / segs;
+    var r = maxR * t;
+    var wFrac;
+    if (t < 0.30) {
+      var u = t / 0.30;
+      wFrac = u * u * (3 - 2 * u);
+    } else {
+      var u = (t - 0.30) / 0.70;
+      wFrac = (1.0 - u * u) * (1.0 - u * taper);
+    }
+    var bend = curvature * t * t;
+    var angle = centerAngle + bend - halfAngle * wFrac;
+    pts.push({ x: cos(angle) * r, y: sin(angle) * r });
   }
 
   return pts;
 }
 
-// -- Draw a filled wedge polygon on a graphics context --
-// Uses curveVertex for smooth spline interpolation between points
-function drawWedge(g, pts, h, s, b, a) {
+// ── Draw a polygon ───────────────────────────────────────
+
+function drawPoly(g, pts, h, s, b, a) {
   g.fill(h, s, b, a);
   g.beginShape();
-  // Repeat first point for curveVertex (it needs a control point before the start)
-  g.curveVertex(pts[0].x, pts[0].y);
   for (var i = 0; i < pts.length; i++) {
-    g.curveVertex(pts[i].x, pts[i].y);
+    g.vertex(pts[i].x, pts[i].y);
   }
-  // Repeat last point for closing control
-  g.curveVertex(pts[pts.length-1].x, pts[pts.length-1].y);
   g.endShape(CLOSE);
 }
 
-// -- Draw a filled wedge on the main p5 canvas (global draw calls) --
-function drawWedgeMain(pts, h, s, b, a) {
+function drawPolyMain(pts, h, s, b, a) {
   fill(h, s, b, a);
   beginShape();
-  curveVertex(pts[0].x, pts[0].y);
   for (var i = 0; i < pts.length; i++) {
-    curveVertex(pts[i].x, pts[i].y);
+    vertex(pts[i].x, pts[i].y);
   }
-  curveVertex(pts[pts.length-1].x, pts[pts.length-1].y);
   endShape(CLOSE);
 }
 
-// -- Core rendering --
+// ── Core Rendering ───────────────────────────────────────
+
 function renderBurst() {
   var panelH = document.getElementById('panel').offsetHeight;
   var visH = height - panelH;
@@ -317,86 +307,72 @@ function renderBurst() {
   var petalHalf = slice * params.width * 0.5;
   var gapHalf = (slice - petalHalf * 2) * 0.5 + petalHalf * 0.2;
 
+  var LAYERS = 40;       // layers per shape
+  var DEPTH = 5;         // subdivision recursion depth
+  var VDIV = 2.5;        // variance divisor per level
+  var ALPHA = 4;          // alpha per layer (out of 100)
+
   // Clear multiply buffer
   gfx.background(0, 0, 100);
   gfx.noStroke();
   gfx.push();
   gfx.translate(cx, cy);
 
-  // -- Layer 1: Gap fills (5 overlapping passes each) --
-  for (var i = 0; i < N; i++) {
-    var ca = slice * i + slice * 0.5;
-    var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
-    var rough = (petalProps[i].edgeRough + petalProps[(i+1)%N].edgeRough) * 0.5;
+  // Build all base polygons first
+  var petalBases = [];
+  var gapBases = [];
 
-    for (var pass = 0; pass < 5; pass++) {
-      // Each pass: slightly different shape, hue, size
-      var pts = buildWedge(
-        ca,
-        gapHalf * (0.92 + pass * 0.04),
-        gR * (0.94 + pass * 0.03),
-        0.3,  // taper
-        0,    // no curvature on gaps
-        rough * (0.6 + pass * 0.1),
-        i + 100,
-        pass * 7
-      );
-      var hShift = (noise(i + 100, pass * 0.5) - 0.5) * 20;
-      var sV = 58 + noise(i + 120, pass * 0.4) * 24;
-      var bV = 55 + noise(i + 140, pass * 0.4) * 25;
-      drawWedge(gfx, pts, (params.gapHue + hShift + 360) % 360, sV, bV, 18);
-    }
-  }
-
-  // -- Layer 2: Petal strokes (6 overlapping passes each) --
   for (var i = 0; i < N; i++) {
     var pp = petalProps[i];
     var ca = slice * i + pp.angleDrift;
     var pR = baseRadius * pp.lengthMult;
     var pH = petalHalf * pp.widthMult;
-
-    for (var pass = 0; pass < 6; pass++) {
-      var pts = buildWedge(
-        ca,
-        pH * (0.88 + pass * 0.05),
-        pR * (0.90 + pass * 0.04),
-        pp.taper,
-        pp.curvature,
-        pp.edgeRough * (0.5 + pass * 0.12),
-        i,
-        pass * 7 + 3
-      );
-      var hShift = (noise(i, pass * 0.5) - 0.5) * 22;
-      var sV = 62 + noise(i + 20, pass * 0.4) * 26;
-      var bV = 52 + noise(i + 40, pass * 0.4) * 28;
-      drawWedge(gfx, pts, (params.hue + hShift + 360) % 360, sV, bV, 20);
-    }
+    petalBases.push(buildWedgeBase(ca, pH, pR, pp.taper, pp.curvature));
   }
 
-  // -- Layer 3: Dark spine strokes (2 passes per petal, narrow) --
   for (var i = 0; i < N; i++) {
-    var pp = petalProps[i];
-    var ca = slice * i + pp.angleDrift;
-    var pR = baseRadius * pp.lengthMult * 0.85;
+    var ca = slice * i + slice * 0.5;
+    var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
+    gapBases.push(buildWedgeBase(ca, gapHalf, gR * 0.88, 0.2, 0));
+  }
 
-    for (var pass = 0; pass < 2; pass++) {
-      var pts = buildWedge(
-        ca,
-        petalHalf * pp.widthMult * 0.20,
-        pR,
-        pp.taper * 0.5,
-        pp.curvature * 1.2,
-        pp.edgeRough * 0.4,
-        i + 400,
-        pass * 11
-      );
-      drawWedge(gfx, pts, (params.hue + 5 + 360) % 360, 72, 38, 12);
+  // Interleave layers: draw gap layers and petal layers alternating
+  // so colors mix optically in overlap zones
+  var batchSize = 5;
+  for (var layer = 0; layer < LAYERS; layer += batchSize) {
+
+    // Gap layers batch
+    for (var i = 0; i < N; i++) {
+      var rough = (petalProps[i].edgeRough + petalProps[(i+1)%N].edgeRough) * 0.5;
+      var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
+      for (var j = layer; j < layer + batchSize && j < LAYERS; j++) {
+        var variance = gR * (0.04 + rough * 0.06);
+        var deformed = deformPolygon(gapBases[i], DEPTH, variance, VDIV);
+        var hShift = (randomGaussian() * 8);
+        var sV = 55 + random(20);
+        var bV = 55 + random(25);
+        drawPoly(gfx, deformed, (params.gapHue + hShift + 360) % 360, sV, bV, ALPHA);
+      }
+    }
+
+    // Petal layers batch
+    for (var i = 0; i < N; i++) {
+      var pp = petalProps[i];
+      var pR = baseRadius * pp.lengthMult;
+      for (var j = layer; j < layer + batchSize && j < LAYERS; j++) {
+        var variance = pR * (0.03 + pp.edgeRough * 0.06);
+        var deformed = deformPolygon(petalBases[i], DEPTH, variance, VDIV);
+        var hShift = (randomGaussian() * 10);
+        var sV = 58 + random(24);
+        var bV = 50 + random(28);
+        drawPoly(gfx, deformed, (params.hue + hShift + 360) % 360, sV, bV, ALPHA);
+      }
     }
   }
 
   gfx.pop();
 
-  // -- Compose to main canvas --
+  // -- Compose --
   background(40, 8, 92);
 
   // Background wash
@@ -410,49 +386,26 @@ function renderBurst() {
   }
   pop();
 
-  // Apply multiply buffer — double pass for strong overlap darkening
+  // Multiply compositing — double pass
   drawingContext.globalCompositeOperation = 'multiply';
   drawingContext.drawImage(gfx.elt, 0, 0);
   drawingContext.drawImage(gfx.elt, 0, 0);
   drawingContext.globalCompositeOperation = 'source-over';
 
-  // Edge pooling + center bloom (normal blend)
+  // Center bloom (normal blend)
   push();
   translate(cx, cy);
   noStroke();
-
-  // Edge pooling: dark wedge fragments at the tips between petals
-  for (var i = 0; i < N; i++) {
-    var ga = slice * i + slice * 0.5;
-    var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
-    for (var p = 0; p < 3; p++) {
-      var pts = buildWedge(
-        ga,
-        gapHalf * (0.25 + p * 0.08),
-        gR * (0.75 + noise(i + 200, p) * 0.2),
-        0.1,
-        0,
-        0.8,
-        i + 200,
-        p * 13
-      );
-      var dH = (params.gapHue + 10 + noise(i + 210, p) * 15) % 360;
-      drawWedgeMain(pts, dH, 50, 30, 10);
-    }
-  }
-
-  // Center bloom
-  for (var r = baseRadius * 0.32; r > 0; r -= 3) {
-    var t = r / (baseRadius * 0.32);
-    fill(params.hue, 45 + (1 - t) * 28, 74 + (1 - t) * 10, 5 + (1 - t) * 7);
+  for (var r = baseRadius * 0.28; r > 0; r -= 3) {
+    var t = r / (baseRadius * 0.28);
+    fill(params.hue, 45 + (1-t)*28, 74 + (1-t)*10, 5 + (1-t)*7);
     ellipse(0, 0, r * 2, r * 2);
   }
-  for (var r = baseRadius * 0.09; r > 0; r -= 2) {
-    var t = r / (baseRadius * 0.09);
-    fill((params.hue + 5) % 360, 68 + (1-t)*18, 38 + (1-t)*14, 10 + (1-t)*14);
+  for (var r = baseRadius * 0.08; r > 0; r -= 2) {
+    var t = r / (baseRadius * 0.08);
+    fill((params.hue+5)%360, 68+(1-t)*18, 38+(1-t)*14, 10+(1-t)*14);
     ellipse(0, 0, r * 2, r * 2);
   }
-
   pop();
 
   // Paper texture
@@ -509,7 +462,7 @@ function initUI() {
     });
   });
 
-  // Auto-cycle seed at 4fps for continuous organic variation
+  // Auto-cycle seed at 4fps
   setInterval(function() {
     params.seed = Math.floor(Math.random() * 99999);
     scheduleRender();
