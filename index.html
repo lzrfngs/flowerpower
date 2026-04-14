@@ -219,7 +219,7 @@ void main() {
   // Where noise is high → wide blur → soft watercolor bleed
   // Where noise is low → tight blur → crisp dried edge
   float blurNoise = fbm(uv * 6.0 + uTime * 0.2 + vec2(42.0, 17.0));
-  float blurSpread = 0.5 + blurNoise * 2.5; // ranges 0.5 to 3.0 texels between samples
+  float blurSpread = 1.5 + blurNoise * 1.5; // moderate, consistent
 
   // ── Step 1: Gaussian blur of the shape buffer ──
   // 9x9 kernel with noise-jittered offsets and variable spread
@@ -247,35 +247,43 @@ void main() {
   petalShape /= totalWeight;
   gapShape /= totalWeight;
 
+  // Kill faint distance field values far from shapes
+  petalShape = petalShape > 0.02 ? petalShape : 0.0;
+  gapShape = gapShape > 0.02 ? gapShape : 0.0;
+
   // Also sample original hard mask
   vec4 orig = texture2D(uShapeBuffer, uv);
   float origPetal = step(0.7, orig.b);
   float origGap = step(0.3, orig.b) * (1.0 - step(0.7, orig.b));
 
   // ── Step 2: Domain-warped noise for organic edge variation ──
-  vec2 noiseUV = uv * 8.0 + uTime * 0.3;
+  // Two scales: large blowout zones + fine edge texture
+  vec2 noiseUV = uv * 4.0 + uTime * 0.2;
   float warpX = fbm(noiseUV + vec2(0.0, 0.0));
   float warpY = fbm(noiseUV + vec2(5.2, 1.3));
-  float edgeNoise = fbm(noiseUV + vec2(warpX, warpY) * 1.5);
+  float edgeNoise = fbm(noiseUV + vec2(warpX, warpY) * 2.5);
+  // Fine-scale edge texture
+  float fineEdge = fbm(uv * 18.0 + uTime * 0.4 + vec2(33.0, 77.0));
 
-  // ── Step 3: Threshold the distance field with noise ──
-  // This is where the watercolor edge magic happens.
-  // The threshold varies per-pixel based on noise, so some areas
-  // bleed outward and others stay crisp.
-  float flowCenter = 0.35;
-  float flowWidth = 0.25;
-  float noiseShift = (edgeNoise - 0.5) * 0.3;
+  // ── Step 3: Threshold — this creates the watercolor blowout ──
+  // Large noiseShift = some areas of the petal push WAY beyond the polygon,
+  // others cut in sharply. This is wet paint expanding irregularly.
+  float flowCenter = 0.30;
+  float flowWidth = 0.20;
+  float noiseShift = (edgeNoise - 0.5) * 0.7 + (fineEdge - 0.5) * 0.15;
 
-  float petalMask = smoothstep(
-    flowCenter - flowWidth + noiseShift,
-    flowCenter + flowWidth + noiseShift,
-    petalShape
-  );
-  float gapMask = smoothstep(
-    flowCenter - flowWidth + noiseShift * 0.8,
-    flowCenter + flowWidth + noiseShift * 0.8,
-    gapShape
-  );
+  // Clamp threshold so it never goes below minimum — prevents phantom shapes in empty space
+  float petalThreshLow = max(flowCenter - flowWidth + noiseShift, 0.08);
+  float petalThreshHigh = max(flowCenter + flowWidth + noiseShift, petalThreshLow + 0.05);
+  float gapThreshLow = max(flowCenter - flowWidth + noiseShift * 0.7, 0.08);
+  float gapThreshHigh = max(flowCenter + flowWidth + noiseShift * 0.7, gapThreshLow + 0.05);
+
+  float petalMask = smoothstep(petalThreshLow, petalThreshHigh, petalShape);
+  float gapMask = smoothstep(gapThreshLow, gapThreshHigh, gapShape);
+
+  // Hard cutoff: zero out mask values below threshold to keep background clean
+  petalMask = petalMask > 0.05 ? petalMask : 0.0;
+  gapMask = gapMask > 0.05 ? gapMask : 0.0;
 
   // ── Step 4: Edge darkening (pigment pooling) ──
   // Where shape value is low but above threshold = edge zone
@@ -335,8 +343,9 @@ void main() {
   float overlap = petalMask * gapMask;
   color *= 1.0 - overlap * 0.25;
 
-  // Paper grain on everything
-  color *= 1.0 - grain * 0.15;
+  // Paper grain only where paint exists (not on clean background)
+  float paintPresence = max(petalMask, gapMask);
+  color *= 1.0 - grain * 0.15 * paintPresence;
 
   gl_FragColor = vec4(color, 1.0);
 }
