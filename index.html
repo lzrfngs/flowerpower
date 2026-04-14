@@ -162,6 +162,21 @@ uniform vec3 uPetalColor;
 uniform vec3 uGapColor;
 uniform vec3 uPaperColor;
 
+// Proper hue rotation in RGB space (rotation around the (1,1,1) axis)
+vec3 rotateHue(vec3 col, float angle) {
+  float cosA = cos(angle);
+  float sinA = sin(angle);
+  // Rodrigues rotation around (1,1,1)/sqrt(3)
+  float oneMinusCos = 1.0 - cosA;
+  float k = 0.57735; // 1/sqrt(3)
+  mat3 m = mat3(
+    cosA + k*k*oneMinusCos,     k*k*oneMinusCos - k*sinA,   k*k*oneMinusCos + k*sinA,
+    k*k*oneMinusCos + k*sinA,   cosA + k*k*oneMinusCos,     k*k*oneMinusCos - k*sinA,
+    k*k*oneMinusCos - k*sinA,   k*k*oneMinusCos + k*sinA,   cosA + k*k*oneMinusCos
+  );
+  return clamp(m * col, 0.0, 1.0);
+}
+
 // Better hash — no directional artifacts from sin(dot()) pattern
 // Uses multiple fract/sin operations with different constants
 float hash(vec2 p) {
@@ -283,31 +298,32 @@ void main() {
 
   // Per-petal hue shift from red channel
   vec4 origSample = texture2D(uShapeBuffer, uv);
-  float petalHueShift = (origSample.r - 0.5) * 0.35; // decoded: ±17% hue rotation
+  float petalHueAngle = (origSample.r - 0.5) * 1.6; // ±45 degrees in radians
 
-  // Composite brightness + warm/cool + saturation shifts
-  float brightnessShift = (colorLarge - 0.5) * 0.6 + (colorMed - 0.5) * 0.4;
-  vec3 warmShift = vec3(0.12, -0.04, -0.10) * (colorLarge - 0.5) * 2.5;
-  vec3 coolShift = vec3(-0.06, 0.04, 0.12) * (colorMed - 0.5) * 1.5;
-  float satShift = (colorFine - 0.5) * 0.3;
+  // Composite brightness + warm/cool + saturation shifts — cranked up
+  float brightnessShift = (colorLarge - 0.5) * 1.0 + (colorMed - 0.5) * 0.6;
+  vec3 warmShift = vec3(0.18, -0.06, -0.15) * (colorLarge - 0.5) * 3.0;
+  vec3 coolShift = vec3(-0.10, 0.06, 0.18) * (colorMed - 0.5) * 2.5;
+  float satShift = (colorFine - 0.5) * 0.5;
 
   // Gap color with variation
   float gapAlpha = gapMask * 0.75 * gapEdge;
   gapAlpha = clamp(gapAlpha + paperBump * gapMask * 0.3, 0.0, 1.0);
-  vec3 gapCol = uGapColor * (1.0 - grain) * (1.0 + brightnessShift);
+  // Rotate gap hue by spatial noise for within-stroke variation
+  vec3 gapCol = rotateHue(uGapColor, (colorMed - 0.5) * 0.8);
+  gapCol = gapCol * (1.0 - grain) * (1.0 + brightnessShift);
   gapCol += warmShift + coolShift;
-  gapCol = mix(gapCol, gapCol * (1.0 + satShift), 0.5);
+  gapCol = mix(gapCol, gapCol * (1.0 + satShift), 0.6);
   color = mix(color, gapCol, gapAlpha);
 
-  // Petal color with per-petal hue shift + variation
+  // Petal color with per-petal hue shift + spatial variation
   float petalAlpha = petalMask * 0.85 * petalEdge;
   petalAlpha = clamp(petalAlpha + paperBump * petalMask * 0.3, 0.0, 1.0);
-  // Rotate petal color by per-petal hue shift (approximate RGB rotation)
-  vec3 petalBase = uPetalColor;
-  petalBase = mix(petalBase, petalBase.gbr, petalHueShift); // crude hue rotation
-  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.7);
+  // Per-petal hue rotation + additional spatial hue variation
+  vec3 petalBase = rotateHue(uPetalColor, petalHueAngle + (colorLarge - 0.5) * 0.6);
+  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.8);
   petalCol += warmShift * 0.8 + coolShift * 0.6;
-  petalCol = mix(petalCol, petalCol * (1.0 + satShift), 0.5);
+  petalCol = mix(petalCol, petalCol * (1.0 + satShift), 0.6);
   color = mix(color, petalCol, petalAlpha);
 
   // Darken overlaps (multiply simulation)
@@ -341,7 +357,7 @@ function generatePetalProps() {
   for (var i = 0; i < N; i++) {
     var s = i * 7.3 + params.seed * 0.01;
     // Per-petal hue shift: each stroke gets its own color drift
-    var hueShift = (noise(s + 600) - 0.5) * 60; // ±30 degrees
+    var hueShift = (noise(s + 600) - 0.5) * 90; // ±45 degrees
     petalProps.push({
       lengthMult: 0.65 + noise(s + 0) * 0.70 * v + 0.15,
       angleDrift: (noise(s + 200) - 0.5) * 0.25 * v,
@@ -552,9 +568,9 @@ function renderBurst() {
   // 1. Draw clean shapes to buffer
   drawShapesToBuffer();
 
-  // 2. Convert hues to RGB for shader
-  var petalRgb = hsbToRgb(params.hue, 75, 60);
-  var gapRgb = hsbToRgb(params.gapHue, 65, 55);
+  // 2. Convert hues to RGB for shader — vivid, saturated colors
+  var petalRgb = hsbToRgb(params.hue, 90, 75);
+  var gapRgb = hsbToRgb(params.gapHue, 80, 70);
 
   // 3. Apply watercolor shader
   shader(watercolorShader);
