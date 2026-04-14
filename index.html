@@ -205,8 +205,12 @@ function subdivideEdge(pts, x1, y1, x2, y2, depth, variance, vdiv) {
     pts.push({ x: x2, y: y2 });
     return;
   }
-  var mx = (x1 + x2) / 2 + randomGaussian() * variance;
-  var my = (y1 + y2) / 2 + randomGaussian() * variance;
+  // Smooth random: average of two uniform randoms for bell-shaped distribution
+  // without the outlier spikes of true Gaussian
+  var rx = (random(-1, 1) + random(-1, 1)) * 0.5 * variance;
+  var ry = (random(-1, 1) + random(-1, 1)) * 0.5 * variance;
+  var mx = (x1 + x2) / 2 + rx;
+  var my = (y1 + y2) / 2 + ry;
   subdivideEdge(pts, x1, y1, mx, my, depth - 1, variance / vdiv, vdiv);
   subdivideEdge(pts, mx, my, x2, y2, depth - 1, variance / vdiv, vdiv);
 }
@@ -228,7 +232,7 @@ function deformPolygon(poly, depth, variance, vdiv) {
 
 function buildWedgeBase(centerAngle, halfAngle, maxR, taper, curvature) {
   var pts = [];
-  var segs = 12;
+  var segs = 6; // fewer segments = broader, rounder deformation
 
   // Center point
   pts.push({ x: 0, y: 0 });
@@ -307,9 +311,9 @@ function renderBurst() {
   var petalHalf = slice * params.width * 0.5;
   var gapHalf = (slice - petalHalf * 2) * 0.5 + petalHalf * 0.2;
 
-  var LAYERS = 40;       // layers per shape
-  var DEPTH = 5;         // subdivision recursion depth
-  var VDIV = 2.5;        // variance divisor per level
+  var LAYERS = 45;       // layers per shape
+  var DEPTH = 3;         // subdivision depth
+  var VDIV = 3;          // variance divisor per level
   var ALPHA = 4;          // alpha per layer (out of 100)
 
   // Clear multiply buffer
@@ -346,7 +350,7 @@ function renderBurst() {
       var rough = (petalProps[i].edgeRough + petalProps[(i+1)%N].edgeRough) * 0.5;
       var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
       for (var j = layer; j < layer + batchSize && j < LAYERS; j++) {
-        var variance = gR * (0.04 + rough * 0.06);
+        var variance = gR * (0.035 + rough * 0.045);
         var deformed = deformPolygon(gapBases[i], DEPTH, variance, VDIV);
         var hShift = (randomGaussian() * 8);
         var sV = 55 + random(20);
@@ -360,7 +364,7 @@ function renderBurst() {
       var pp = petalProps[i];
       var pR = baseRadius * pp.lengthMult;
       for (var j = layer; j < layer + batchSize && j < LAYERS; j++) {
-        var variance = pR * (0.03 + pp.edgeRough * 0.06);
+        var variance = pR * (0.03 + pp.edgeRough * 0.05);
         var deformed = deformPolygon(petalBases[i], DEPTH, variance, VDIV);
         var hShift = (randomGaussian() * 10);
         var sV = 58 + random(24);
