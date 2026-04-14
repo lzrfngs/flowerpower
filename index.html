@@ -187,32 +187,32 @@ void main() {
 
   // Petal wave: cos(N * angle) gives N petals
   float petalWave = cos(N * (a + warpA)) * 0.5 + 0.5; // 0-1, peaks at petal centers
-  // Modulate petal reach by the wave
-  float petalReach = 0.6 + petalWave * uWidth * 0.5 + warpR;
+  float gapWave = 1.0 - petalWave; // inverse: peaks between petals
+  // Modulate reach by the wave
+  float petalReach = 0.5 + petalWave * uWidth * 0.6 + warpR;
+  float gapReach = 0.5 + gapWave * uWidth * 0.45 + warpR * 0.8;
 
-  // Distance from petal boundary (positive = inside, negative = outside)
-  float dist = petalReach - r;
-
-  // ── Soft falloff — the whole look ──
-  // Very wide smoothstep for that faded, out-of-focus print quality.
-  // No hard threshold. Everything dissolves into everything.
+  // ── Two distinct zones with soft falloff ──
   float soft = uSoftness;
-  float petalMask = smoothstep(-soft, soft * 2.0, dist);
-  float gapMask = smoothstep(-soft * 0.5, soft * 1.5, dist);
-  // Invert gap: strongest where petals are weakest
-  float gapPresence = (1.0 - petalMask) * smoothstep(1.2, 0.3, r);
+  // Petal: strong where petalWave is high AND within petal reach
+  float petalDist = petalReach - r;
+  float petalMask = smoothstep(-soft, soft, petalDist) * smoothstep(0.2, 0.6, petalWave);
+  // Gap: strong where gapWave is high AND within gap reach
+  float gapDist = gapReach - r;
+  float gapMask = smoothstep(-soft, soft, gapDist) * smoothstep(0.2, 0.6, gapWave);
+  // Overall paint presence
+  float anyPaint = smoothstep(1.3, 0.4, r);
 
-  // ── Color mixing ──
-  // Start with paper
+  // ── Color mixing — two distinct tones ──
   vec3 color = uPaper;
 
   // Per-petal hue variation via noise
   float hueVar = fbm(vec2(a * 3.0, uTime * 0.1) + 200.0);
-  float hueShift = (hueVar - 0.5) * 0.12; // subtle, within-family
+  float hueShift = (hueVar - 0.5) * 0.15;
 
-  // Gap color: laid down first, faded
-  vec3 gapCol = uColor2 * (0.85 + fbm(vec2(a*2.0, r*5.0) + 700.0) * 0.3);
-  color = mix(color, gapCol, gapPresence * 0.55);
+  // Gap color: bold, clearly different from petals
+  vec3 gapCol = uColor2 * (0.80 + fbm(vec2(a*2.0, r*5.0) + 700.0) * 0.35);
+  color = mix(color, gapCol, gapMask * 0.75 * anyPaint);
 
   // Petal color: on top, with gradient from bright center to muted edge
   float radialGrad = smoothstep(0.0, petalReach * 0.8, r);
@@ -224,18 +224,15 @@ void main() {
   color = mix(color, petalCol, petalMask * 0.8);
 
   // ── Dark pooling at intersections ──
-  // Where gap and petal overlap strongly, pigment concentrates
-  float pooling = petalMask * gapPresence;
-  color *= 1.0 - pooling * 0.35;
+  float pooling = petalMask * gapMask;
+  color *= 1.0 - pooling * 0.45;
 
   // ── Paper texture ──
-  // Very subtle, like aged paper fiber
   float paper = fbm(uv * 30.0 + 1000.0);
   color *= 0.97 + paper * 0.06;
 
-  // ── Fade to paper at edges (vignette-like) ──
-  float outerFade = smoothstep(1.3, 0.5, r);
-  color = mix(uPaper, color, outerFade);
+  // ── Fade to paper at edges ──
+  color = mix(uPaper, color, anyPaint);
 
   // ── Sun-exposed desaturation ──
   // Push everything slightly toward the paper tone, as if faded by light
@@ -287,9 +284,9 @@ function hsbToRgb(h, s, b) {
 }
 
 function renderFlower() {
-  // Muted, chalky colors — not vivid
+  // Muted but distinct — gap color is clearly different from petals
   var col1 = hsbToRgb(params.hue, 55, 70);
-  var col2 = hsbToRgb((params.hue + 55) % 360, 40, 60);
+  var col2 = hsbToRgb((params.hue + 140) % 360, 45, 55);
 
   shader(flowerShader);
   flowerShader.setUniform('uResolution', [width, height]);
