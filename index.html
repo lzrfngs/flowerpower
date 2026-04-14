@@ -93,13 +93,6 @@ input[type=range]::-moz-range-thumb {
     </div>
   </div>
   <div class="ctrl-group">
-    <span class="ctrl-label">Variation</span>
-    <div class="ctrl-with-val">
-      <input type="range" id="s-vary" min="0" max="1" step="0.01" value="0.50">
-      <span class="ctrl-val" id="v-vary">0.50</span>
-    </div>
-  </div>
-  <div class="ctrl-group">
     <span class="ctrl-label">Hue</span>
     <div class="ctrl-with-val">
       <input type="range" id="s-hue" min="0" max="359" step="1" value="42">
@@ -115,6 +108,7 @@ input[type=range]::-moz-range-thumb {
     </div>
   </div>
   <div class="hue-dot" id="gap-preview"></div>
+  <button id="btn-pause" style="width:34px;height:34px;background:var(--accent);color:var(--cream);border:none;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:inherit;transition:opacity 0.12s;align-self:flex-end" title="Pause/Play">&#9646;&#9646;</button>
 </div>
 
 <script>
@@ -124,7 +118,7 @@ input[type=range]::-moz-range-thumb {
 // No CSS blur needed — the technique IS the softness.
 
 var params = {
-  count: 7, width: 0.62, vary: 0.50,
+  count: 7, width: 0.62, vary: 1.0,
   hue: 42, gapHue: 195, seed: 12345
 };
 
@@ -447,7 +441,6 @@ function initUI() {
   var sliders = [
     { id: 's-count', key: 'count',  vid: 'v-count', fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
     { id: 's-width', key: 'width',  vid: 'v-width', fmt: function(v){return v.toFixed(2);} },
-    { id: 's-vary',  key: 'vary',   vid: 'v-vary',  fmt: function(v){return v.toFixed(2);} },
     { id: 's-hue',   key: 'hue',    vid: 'v-hue',   fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
     { id: 's-gap',   key: 'gapHue', vid: 'v-gap',   fmt: function(v){return ''+Math.round(v);}, parse: Math.round }
   ];
@@ -467,10 +460,27 @@ function initUI() {
   });
 
   // Auto-cycle seed at 4fps
-  setInterval(function() {
+  var cycling = true;
+  var cycleTimer = setInterval(function() {
     params.seed = Math.floor(Math.random() * 99999);
     scheduleRender();
   }, 250);
+
+  // Pause/play button
+  var btnPause = document.getElementById('btn-pause');
+  btnPause.addEventListener('click', function() {
+    cycling = !cycling;
+    if (cycling) {
+      cycleTimer = setInterval(function() {
+        params.seed = Math.floor(Math.random() * 99999);
+        scheduleRender();
+      }, 250);
+      btnPause.innerHTML = '&#9646;&#9646;';
+    } else {
+      clearInterval(cycleTimer);
+      btnPause.innerHTML = '&#9654;';
+    }
+  });
 
   updatePreviews();
 }
