@@ -102,27 +102,33 @@ input[type=range]::-moz-range-thumb {
 <div id="panel">
   <div class="ctrl-group">
     <span class="ctrl-label">Width</span>
-    <div class="ctrl-row">
+    <div class="ctrl-with-val">
       <input type="range" id="s-width" min="0.3" max="0.9" step="0.01" value="0.62">
       <span class="ctrl-val" id="v-width">0.62</span>
+    </div>
+    <div class="ctrl-row">
       <button class="lfo-btn" data-lfo="width" title="LFO">&sim;</button>
       <input type="range" class="lfo-speed" data-lfo-speed="width" min="0.05" max="2" step="0.05" value="0.3">
     </div>
   </div>
   <div class="ctrl-group">
     <span class="ctrl-label">Center</span>
-    <div class="ctrl-row">
+    <div class="ctrl-with-val">
       <input type="range" id="s-center" min="0" max="0.6" step="0.01" value="0.10">
       <span class="ctrl-val" id="v-center">0.10</span>
+    </div>
+    <div class="ctrl-row">
       <button class="lfo-btn" data-lfo="centerR" title="LFO">&sim;</button>
       <input type="range" class="lfo-speed" data-lfo-speed="centerR" min="0.05" max="2" step="0.05" value="0.2">
     </div>
   </div>
   <div class="ctrl-group">
     <span class="ctrl-label">Hue</span>
-    <div class="ctrl-row">
+    <div class="ctrl-with-val">
       <input type="range" id="s-hue" min="0" max="359" step="1" value="42">
       <span class="ctrl-val" id="v-hue">42</span>
+    </div>
+    <div class="ctrl-row">
       <button class="lfo-btn" data-lfo="hue" title="LFO">&sim;</button>
       <input type="range" class="lfo-speed" data-lfo-speed="hue" min="0.05" max="2" step="0.05" value="0.15">
     </div>
@@ -496,82 +502,37 @@ var renderRAF = null;
 var petalProps = [];
 
 function generatePetalProps() {
-  // Use a fixed noiseSeed — variation comes from seed as a continuous offset
-  // into the noise field, so shapes morph fluidly as seed drifts
   noiseSeed(42);
-  randomSeed(42);
   petalProps = [];
-  var seedOffset = params.seed * 0.01; // continuous float offset
+  var t = params.seed * 0.01; // continuous time dimension for smooth morphing
   var N = params.count;
   var v = params.vary;
   for (var i = 0; i < N; i++) {
-    var s = i * 7.3 + seedOffset;
-    var hueShift = (noise(s + 600) - 0.5) * 90;
+    var ix = i * 7.3; // fixed per-petal offset
+    // 2D noise: (petal index axis, time axis) — smooth in both dimensions
+    var hueShift = (noise(ix + 600, t) - 0.5) * 50;
 
-    // Pick a random shape archetype per petal
-    var archetype = Math.floor(noise(s + 700) * 5);
-    var right, left;
+    // Continuous shape — no archetype switching, just noise-driven control points
+    var right = [
+      { t: 0.0, w: noise(ix+10, t) * 0.35 },
+      { t: 0.12 + noise(ix+40, t) * 0.12, w: 0.3 + noise(ix+11, t) * 0.9 },
+      { t: 0.35 + noise(ix+41, t) * 0.2,  w: 0.4 + noise(ix+12, t) * 0.8 },
+      { t: 0.65 + noise(ix+42, t) * 0.2,  w: 0.2 + noise(ix+13, t) * 0.7 },
+      { t: 1.0, w: noise(ix+14, t) * 0.25 },
+    ];
 
-    if (archetype === 0) {
-      // FAT BLOB — uniformly wide, rounded tips
-      right = [
-        { t: 0.0, w: 0.2 + noise(s+10)*0.3 },
-        { t: 0.20, w: 0.8 + noise(s+11)*0.5 },
-        { t: 0.50, w: 0.9 + noise(s+12)*0.5 },
-        { t: 0.80, w: 0.7 + noise(s+13)*0.5 },
-        { t: 1.0, w: 0.15 + noise(s+14)*0.2 },
-      ];
-    } else if (archetype === 1) {
-      // THIN NEEDLE — narrow throughout, pointed
-      right = [
-        { t: 0.0, w: 0.05 },
-        { t: 0.15, w: 0.15 + noise(s+11)*0.2 },
-        { t: 0.45, w: 0.2 + noise(s+12)*0.25 },
-        { t: 0.75, w: 0.1 + noise(s+13)*0.15 },
-        { t: 1.0, w: 0.0 },
-      ];
-    } else if (archetype === 2) {
-      // WIDE PADDLE — fat middle, abrupt narrow at base and tip
-      right = [
-        { t: 0.0, w: 0.05 + noise(s+10)*0.1 },
-        { t: 0.12, w: 0.7 + noise(s+11)*0.6 },
-        { t: 0.50, w: 1.0 + noise(s+12)*0.4 },
-        { t: 0.85, w: 0.8 + noise(s+13)*0.4 },
-        { t: 1.0, w: 0.1 + noise(s+14)*0.15 },
-      ];
-    } else if (archetype === 3) {
-      // PINCHED MIDDLE — wide at base and tip, narrow waist
-      right = [
-        { t: 0.0, w: 0.3 + noise(s+10)*0.3 },
-        { t: 0.20, w: 0.6 + noise(s+11)*0.4 },
-        { t: 0.45, w: 0.1 + noise(s+12)*0.2 },
-        { t: 0.70, w: 0.5 + noise(s+13)*0.5 },
-        { t: 1.0, w: 0.2 + noise(s+14)*0.2 },
-      ];
-    } else {
-      // TOP-HEAVY — widest near the tip, like a mushroom or fan
-      right = [
-        { t: 0.0, w: 0.1 + noise(s+10)*0.15 },
-        { t: 0.25, w: 0.2 + noise(s+11)*0.3 },
-        { t: 0.55, w: 0.5 + noise(s+12)*0.5 },
-        { t: 0.80, w: 0.9 + noise(s+13)*0.5 },
-        { t: 1.0, w: 0.3 + noise(s+14)*0.3 },
-      ];
-    }
-
-    // Left side: same archetype but different noise for asymmetry
-    left = [];
+    var left = [];
     for (var j = 0; j < right.length; j++) {
       left.push({
         t: right[j].t,
-        w: right[j].w * (0.6 + noise(s + 30 + j * 3) * 0.8)
+        w: right[j].w * (0.5 + noise(ix + 30 + j * 3, t) * 0.9)
       });
     }
 
     petalProps.push({
-      lengthMult: 0.55 + noise(s + 0) * 0.90 * v + 0.15,
-      angleDrift: (noise(s + 200) - 0.5) * 0.25 * v,
-      curvature:  (noise(s + 100) - 0.5) * 0.60 * v,
+      lengthMult: 0.55 + noise(ix, t) * 0.90 * v + 0.15,
+      angleDrift: (noise(ix + 200, t) - 0.5) * 0.25 * v,
+      curvature:  (noise(ix + 100, t) - 0.5) * 0.60 * v,
       hueShift:   hueShift,
       rightPts:   right,
       leftPts:    left,
@@ -881,8 +842,8 @@ function initUI() {
     lfoTime += 0.016;
     var anyActive = false;
 
-    // Continuous seed morphing — fixed drift rate
-    params.seed += 0.02 * params.morphSpeed;
+    // Continuous seed morphing — drift rate
+    params.seed += 0.5 * params.morphSpeed;
     scheduleRender();
 
     for (var key in lfoState) {
