@@ -11,11 +11,11 @@
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --cream: #F5EFE4; --panel: #DDD7CB; --border: #BFB8A8;
+  --cream: #D8D0C0; --panel: #DDD7CB; --border: #BFB8A8;
   --text: #4A4030; --dim: #8A8070; --accent: #3A3020; --track: #C8C0B0;
 }
 body {
-  background-color: #F5EFE4;
+  background-color: #D8D0C0;
   font-family: 'IBM Plex Mono', monospace;
   width: 100vw; height: 100vh; overflow: hidden; color: var(--text);
 }
@@ -326,71 +326,80 @@ void main() {
   petalMask = petalMask > 0.05 ? petalMask : 0.0;
   gapMask = gapMask > 0.05 ? gapMask : 0.0;
 
-  // ── Step 4: Edge darkening — minimal, no green shift ──
-  float petalEdge = 1.0;
-  float gapEdge = 1.0;
+  // ── Step 4: Edge darkening ──
+  float petalEdgeDarken = smoothstep(0.1, 0.7, petalShape);
+  float gapEdgeDarken = smoothstep(0.1, 0.7, gapShape);
 
-  // ── Step 5: Paper texture ── (low frequency, subtle)
+  // ── Step 5: Paper texture ──
   float grain = fbm(uv * 20.0 + 100.0) * 0.06;
   float paperBump = fbm(uv * 8.0 + 50.0) * 0.04;
 
   // ── Step 6: Composite color ──
   vec3 color = uPaperColor;
 
-  // Multi-scale color variation — 3 noise layers at different frequencies
-  // Large: broad warm/cool zones across the whole form
+  // Color variation noise
   float colorLarge = fbm(uv * 3.0 + uTime * 0.05 + vec2(3.1, 7.4));
-  // Medium: mottling within each stroke
   vec2 medUV = uv * 8.0 + uTime * 0.15;
   float medWarpX = fbm(medUV + vec2(8.9, 2.6));
   float medWarpY = fbm(medUV + vec2(1.4, 6.3));
   float colorMed = fbm(medUV + vec2(medWarpX, medWarpY) * 2.0);
-  // Fine: granular pigment variation
   float colorFine = fbm(uv * 25.0 + 200.0);
 
-  // Per-petal hue shift from red channel
   vec4 origSample = texture2D(uShapeBuffer, uv);
-  float petalHueAngle = (origSample.r - 0.5) * 1.6; // ±45 degrees in radians
+  float petalHueAngle = (origSample.r - 0.5) * 1.6;
 
-  // Composite brightness + warm/cool + saturation shifts — controlled
-  float brightnessShift = (colorLarge - 0.5) * 0.45 + (colorMed - 0.5) * 0.25;
-  vec3 warmShift = vec3(0.06, -0.02, -0.05) * (colorLarge - 0.5) * 2.0;
-  vec3 coolShift = vec3(-0.04, 0.02, 0.06) * (colorMed - 0.5) * 1.5;
-  float satShift = (colorFine - 0.5) * 0.2;
+  float brightnessShift = (colorLarge - 0.5) * 0.55 + (colorMed - 0.5) * 0.3;
 
-  // Gap color — soft mask, suppress under petals
+  // Gap color with edge darkening
   float softGapMask = pow(gapMask, 0.6);
-  float gapAlpha = softGapMask * 0.70;
+  float gapAlpha = softGapMask * 0.75;
   gapAlpha *= max(0.0, 1.0 - petalMask * 1.5);
   gapAlpha = clamp(gapAlpha, 0.0, 1.0);
   vec3 gapCol = rotateHue(uGapColor, (colorMed - 0.5) * 0.4);
   gapCol = gapCol * (1.0 - grain) * (1.0 + brightnessShift);
+  vec3 gapDark = gapCol * 0.35;
+  gapCol = mix(gapDark, gapCol, gapEdgeDarken);
   gapCol = clamp(gapCol, 0.0, 1.0);
   color = mix(color, gapCol, gapAlpha);
 
-  // Petal color with per-petal hue shift + spatial variation
-  // Soften the mask with pow() so interior fades gradually, no hard contour
+  // Petal color with edge darkening
   float softPetalMask = pow(petalMask, 0.6);
-  float petalAlpha = softPetalMask * 0.80;
+  float petalAlpha = softPetalMask * 0.88;
   petalAlpha = clamp(petalAlpha, 0.0, 1.0);
-  // Per-petal hue rotation + controlled spatial hue variation
   vec3 petalBase = rotateHue(uPetalColor, petalHueAngle + (colorLarge - 0.5) * 0.3);
-  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.5);
+  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.7);
+  vec3 petalDark = petalCol * 0.30;
+  petalCol = mix(petalDark, petalCol, petalEdgeDarken);
   petalCol = clamp(petalCol, 0.0, 1.0);
   color = mix(color, petalCol, petalAlpha);
 
-  // Blend petal and gap colors where they overlap — actual wet-on-wet mixing
+  // Wet-on-wet mixing in overlap zones
   float overlap = petalMask * gapMask;
-  if (overlap > 0.05) {
-    // Mix the two pigments together in overlap zone (like wet paint merging)
-    vec3 mixedCol = (petalCol * petalMask + gapCol * gapMask) / (petalMask + gapMask + 0.001);
-    // Darken the mix (pigments are additive/subtractive in watercolor)
-    mixedCol *= 0.75 + (1.0 - overlap) * 0.25;
-    color = mix(color, mixedCol, overlap * 0.8);
-  }
+  vec3 mixedCol = (petalCol * petalMask + gapCol * gapMask) / (petalMask + gapMask + 0.001);
+  mixedCol *= 0.75 + (1.0 - overlap) * 0.25;
+  color = mix(color, mixedCol, overlap * 0.8 * step(0.05, overlap));
 
-  // Paper grain only where paint exists
   float paintPresence = max(petalMask, gapMask);
+
+  // ── Color bleed halos ──
+  float petalHalo = smoothstep(0.0, 0.15, petalShape) * (1.0 - smoothstep(0.15, 0.5, petalShape));
+  float gapHalo = smoothstep(0.0, 0.15, gapShape) * (1.0 - smoothstep(0.15, 0.5, gapShape));
+  vec3 haloCol = clamp(rotateHue(uPetalColor, petalHueAngle) * 1.2, 0.0, 1.0);
+  color = mix(color, haloCol, petalHalo * 0.3);
+  color = mix(color, clamp(uGapColor * 1.15, 0.0, 1.0), gapHalo * 0.25);
+
+  // ── Complementary accents in overlaps ──
+  vec3 compColor = clamp(rotateHue(uPetalColor, 3.14159) * 1.3, 0.0, 1.0);
+  float compStr = overlap * (1.0 - overlap) * 4.0 * step(0.1, overlap) * step(0.55, edgeNoise);
+  color = mix(color, compColor, compStr * 0.25);
+
+  // ── Inner glow ──
+  float glowDist = length(uv - vec2(0.5)) * 2.5;
+  float innerGlow = (1.0 - smoothstep(0.0, 0.6, glowDist)) * paintPresence;
+  vec3 glowColor = clamp(rotateHue(uPetalColor, 0.15) * 1.4 + vec3(0.1, 0.08, 0.02), 0.0, 1.0);
+  color = mix(color, glowColor, innerGlow * 0.35);
+
+  // Paper grain
   color *= 1.0 - grain * 0.15 * paintPresence;
 
   gl_FragColor = vec4(color, 1.0);
@@ -689,7 +698,7 @@ function renderBurst() {
   watercolorShader.setUniform('uTime', millis() / 1000.0);
   watercolorShader.setUniform('uPetalColor', petalRgb);
   watercolorShader.setUniform('uGapColor', gapRgb);
-  watercolorShader.setUniform('uPaperColor', [0.96, 0.937, 0.894]); // warm cream
+  watercolorShader.setUniform('uPaperColor', [0.847, 0.816, 0.753]);
 
   // Draw a full-screen plane to trigger the fragment shader
   noStroke();
