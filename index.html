@@ -219,7 +219,7 @@ void main() {
   // Where noise is high → wide blur → soft watercolor bleed
   // Where noise is low → tight blur → crisp dried edge
   float blurNoise = fbm(uv * 6.0 + uTime * 0.2 + vec2(42.0, 17.0));
-  float blurSpread = 1.5 + blurNoise * 1.5; // moderate, consistent
+  float blurSpread = 1.8 + blurNoise * 2.0; // mushy, wide sampling
 
   // ── Step 1: Gaussian blur of the shape buffer ──
   // 9x9 kernel with noise-jittered offsets and variable spread
@@ -264,7 +264,7 @@ void main() {
   float petalEdgeProximity = 4.0 * petalShape * (1.0 - petalShape); // peaks at 0.5
   float gapEdgeProximity = 4.0 * gapShape * (1.0 - gapShape);
   float grainNoise = hash(uv * uResolution + fract(uTime * 137.0)) - 0.5; // per-pixel, per-frame
-  float grainStrength = 0.12;
+  float grainStrength = 0.25;
   petalShape += grainNoise * grainStrength * petalEdgeProximity;
   gapShape += grainNoise * grainStrength * gapEdgeProximity;
 
@@ -288,20 +288,19 @@ void main() {
   // Invert: strongest near center, fades outward
   float burstWeight = 1.0 - smoothstep(0.0, 0.8, distFromCenter);
 
-  // ── Step 3: Threshold — blobby merging + radial burst ──
-  // Lower flowCenter = petals bleed together more.
-  // Noise shift boosted near center for burst-out feeling.
-  float flowCenter = 0.18;
-  float flowWidth = 0.18;
+  // ── Step 3: Threshold — mushy, wide transition zones ──
+  // Very wide flowWidth = gradual fade, not on/off.
+  // Low flowCenter = petals bleed and merge heavily.
+  float flowCenter = 0.12;
+  float flowWidth = 0.30;
   float noiseShift = (edgeNoise - 0.5) * 0.9 + (fineEdge - 0.5) * 0.2;
-  // Boost noise near center — pushes boundaries outward from the middle
   noiseShift += burstWeight * 0.15;
 
-  // Clamp threshold so it never goes below minimum — prevents phantom shapes in empty space
-  float petalThreshLow = max(flowCenter - flowWidth + noiseShift, 0.06);
-  float petalThreshHigh = max(flowCenter + flowWidth + noiseShift, petalThreshLow + 0.04);
-  float gapThreshLow = max(flowCenter - flowWidth + noiseShift * 0.7, 0.06);
-  float gapThreshHigh = max(flowCenter + flowWidth + noiseShift * 0.7, gapThreshLow + 0.04);
+  // Clamp threshold floor
+  float petalThreshLow = max(flowCenter - flowWidth + noiseShift, 0.04);
+  float petalThreshHigh = max(flowCenter + flowWidth + noiseShift, petalThreshLow + 0.08);
+  float gapThreshLow = max(flowCenter - flowWidth + noiseShift * 0.7, 0.04);
+  float gapThreshHigh = max(flowCenter + flowWidth + noiseShift * 0.7, gapThreshLow + 0.08);
 
   float petalMask = smoothstep(petalThreshLow, petalThreshHigh, petalShape);
   float gapMask = smoothstep(gapThreshLow, gapThreshHigh, gapShape);
@@ -338,37 +337,42 @@ void main() {
   vec4 origSample = texture2D(uShapeBuffer, uv);
   float petalHueAngle = (origSample.r - 0.5) * 1.6; // ±45 degrees in radians
 
-  // Composite brightness + warm/cool + saturation shifts — cranked up
-  float brightnessShift = (colorLarge - 0.5) * 1.0 + (colorMed - 0.5) * 0.6;
-  vec3 warmShift = vec3(0.18, -0.06, -0.15) * (colorLarge - 0.5) * 3.0;
-  vec3 coolShift = vec3(-0.10, 0.06, 0.18) * (colorMed - 0.5) * 2.5;
-  float satShift = (colorFine - 0.5) * 0.5;
+  // Composite brightness + warm/cool + saturation shifts — controlled
+  float brightnessShift = (colorLarge - 0.5) * 0.45 + (colorMed - 0.5) * 0.25;
+  vec3 warmShift = vec3(0.06, -0.02, -0.05) * (colorLarge - 0.5) * 2.0;
+  vec3 coolShift = vec3(-0.04, 0.02, 0.06) * (colorMed - 0.5) * 1.5;
+  float satShift = (colorFine - 0.5) * 0.2;
 
   // Gap color with variation
   float gapAlpha = gapMask * 0.75 * gapEdge;
   gapAlpha = clamp(gapAlpha + paperBump * gapMask * 0.3, 0.0, 1.0);
-  // Rotate gap hue by spatial noise for within-stroke variation
-  vec3 gapCol = rotateHue(uGapColor, (colorMed - 0.5) * 0.8);
+  vec3 gapCol = rotateHue(uGapColor, (colorMed - 0.5) * 0.4);
   gapCol = gapCol * (1.0 - grain) * (1.0 + brightnessShift);
   gapCol += warmShift + coolShift;
-  gapCol = mix(gapCol, gapCol * (1.0 + satShift), 0.6);
+  gapCol = mix(gapCol, gapCol * (1.0 + satShift), 0.4);
   color = mix(color, gapCol, gapAlpha);
 
   // Petal color with per-petal hue shift + spatial variation
   float petalAlpha = petalMask * 0.85 * petalEdge;
   petalAlpha = clamp(petalAlpha + paperBump * petalMask * 0.3, 0.0, 1.0);
-  // Per-petal hue rotation + additional spatial hue variation
-  vec3 petalBase = rotateHue(uPetalColor, petalHueAngle + (colorLarge - 0.5) * 0.6);
-  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.8);
-  petalCol += warmShift * 0.8 + coolShift * 0.6;
-  petalCol = mix(petalCol, petalCol * (1.0 + satShift), 0.6);
+  // Per-petal hue rotation + controlled spatial hue variation
+  vec3 petalBase = rotateHue(uPetalColor, petalHueAngle + (colorLarge - 0.5) * 0.3);
+  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.5);
+  petalCol += warmShift * 0.5 + coolShift * 0.3;
+  petalCol = mix(petalCol, petalCol * (1.0 + satShift), 0.3);
   color = mix(color, petalCol, petalAlpha);
 
-  // Darken overlaps (multiply simulation)
+  // Blend petal and gap colors where they overlap — actual wet-on-wet mixing
   float overlap = petalMask * gapMask;
-  color *= 1.0 - overlap * 0.25;
+  if (overlap > 0.05) {
+    // Mix the two pigments together in overlap zone (like wet paint merging)
+    vec3 mixedCol = (petalCol * petalMask + gapCol * gapMask) / (petalMask + gapMask + 0.001);
+    // Darken the mix (pigments are additive/subtractive in watercolor)
+    mixedCol *= 0.75 + (1.0 - overlap) * 0.25;
+    color = mix(color, mixedCol, overlap * 0.6);
+  }
 
-  // Paper grain only where paint exists (not on clean background)
+  // Paper grain only where paint exists
   float paintPresence = max(petalMask, gapMask);
   color *= 1.0 - grain * 0.15 * paintPresence;
 
