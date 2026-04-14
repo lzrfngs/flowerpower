@@ -101,15 +101,6 @@ input[type=range]::-moz-range-thumb {
 
 <div id="panel">
   <div class="ctrl-group">
-    <span class="ctrl-label">Petals</span>
-    <div class="ctrl-row">
-      <input type="range" id="s-count" min="5" max="9" step="1" value="7">
-      <span class="ctrl-val" id="v-count">7</span>
-      <button class="lfo-btn" data-lfo="count" title="LFO">&sim;</button>
-      <input type="range" class="lfo-speed" data-lfo-speed="count" min="0.05" max="2" step="0.05" value="0.5">
-    </div>
-  </div>
-  <div class="ctrl-group">
     <span class="ctrl-label">Width</span>
     <div class="ctrl-row">
       <input type="range" id="s-width" min="0.3" max="0.9" step="0.01" value="0.62">
@@ -145,7 +136,6 @@ input[type=range]::-moz-range-thumb {
     <button class="lfo-btn" id="fx-granulation" title="Granulation">&bull;</button>
     <button class="lfo-btn" id="fx-dispersion" title="Dispersion">&bull;</button>
   </div>
-  <button id="btn-pause" title="Play">&#9654;</button>
 </div>
 
 <script>
@@ -379,19 +369,6 @@ void main() {
   vec3 gapDark = rotateHue(uGapColor, 0.35) * 0.30; // warm-shifted dark
   gapCol = mix(gapDark, gapCol, gapEdgeDarken);
   gapCol = clamp(gapCol, 0.0, 1.0);
-  // ── Capillary action: warm wicks outward, cool pools inward ──
-  if (uFxCapillary > 0.5) {
-    float capillary = smoothstep(0.2, 0.9, petalMask);
-    vec3 warmPull = rotateHue(petalCol, -0.4) * 1.2;
-    vec3 coolPool = rotateHue(petalCol, 0.5) * 0.75;
-    petalCol = mix(mix(coolPool, petalCol, capillary), warmPull, (1.0 - capillary) * 0.45);
-    // Same for gaps
-    float gapCap = smoothstep(0.2, 0.9, gapMask);
-    vec3 gapWarm = rotateHue(gapCol, -0.3) * 1.15;
-    vec3 gapCool = rotateHue(gapCol, 0.4) * 0.8;
-    gapCol = mix(mix(gapCool, gapCol, gapCap), gapWarm, (1.0 - gapCap) * 0.4);
-  }
-
   color = mix(color, gapCol, gapAlpha);
 
   // Petal color with edge darkening + hue shift
@@ -409,6 +386,19 @@ void main() {
   vec3 petalDark = rotateHue(uPetalColor, petalHueShift + 0.4) * 0.28;
   petalCol = mix(petalDark, petalCol, petalEdgeDarken);
   petalCol = clamp(petalCol, 0.0, 1.0);
+
+  // ── Capillary action: warm wicks outward, cool pools inward ──
+  if (uFxCapillary > 0.5) {
+    float capillary = smoothstep(0.2, 0.9, petalMask);
+    vec3 warmPull = rotateHue(petalCol, -0.4) * 1.2;
+    vec3 coolPool = rotateHue(petalCol, 0.5) * 0.75;
+    petalCol = mix(mix(coolPool, petalCol, capillary), warmPull, (1.0 - capillary) * 0.45);
+    float gapCap = smoothstep(0.2, 0.9, gapMask);
+    vec3 gapWarm = rotateHue(gapCol, -0.3) * 1.15;
+    vec3 gapCool = rotateHue(gapCol, 0.4) * 0.8;
+    gapCol = mix(mix(gapCool, gapCol, gapCap), gapWarm, (1.0 - gapCap) * 0.4);
+  }
+
   color = mix(color, petalCol, petalAlpha);
 
   // Wet-on-wet mixing in overlap zones
@@ -490,8 +480,8 @@ void main() {
 
 // ── Parameters ──
 var params = {
-  count: 7, width: 0.62, vary: 1.0, centerR: 0.10,
-  hue: 42, gapHue: 195, seed: 12345, speed: 0.3
+  count: 8, width: 0.62, vary: 1.0, centerR: 0.10,
+  hue: 42, gapHue: 195, seed: 12345, morphSpeed: 0.3
 };
 
 // FX toggles — all start off
@@ -506,13 +496,16 @@ var renderRAF = null;
 var petalProps = [];
 
 function generatePetalProps() {
-  noiseSeed(params.seed);
-  randomSeed(params.seed);
+  // Use a fixed noiseSeed — variation comes from seed as a continuous offset
+  // into the noise field, so shapes morph fluidly as seed drifts
+  noiseSeed(42);
+  randomSeed(42);
   petalProps = [];
+  var seedOffset = params.seed * 0.01; // continuous float offset
   var N = params.count;
   var v = params.vary;
   for (var i = 0; i < N; i++) {
-    var s = i * 7.3 + params.seed * 0.01;
+    var s = i * 7.3 + seedOffset;
     var hueShift = (noise(s + 600) - 0.5) * 90;
 
     // Pick a random shape archetype per petal
@@ -821,7 +814,6 @@ function scheduleRender() {
 
 function initUI() {
   var sliders = [
-    { id: 's-count',  key: 'count',   vid: 'v-count',  fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
     { id: 's-width',  key: 'width',   vid: 'v-width',  fmt: function(v){return v.toFixed(2);} },
     { id: 's-center', key: 'centerR', vid: 'v-center', fmt: function(v){return v.toFixed(2);} },
     { id: 's-hue',    key: 'hue',     vid: 'v-hue',    fmt: function(v){return ''+Math.round(v);}, parse: Math.round }
@@ -843,26 +835,23 @@ function initUI() {
 
   // Per-slider LFO state
   var lfoState = {
-    count:   { active: false, speed: 0.5, phase: 0 },
     width:   { active: false, speed: 0.3, phase: 1.3 },
     centerR: { active: false, speed: 0.2, phase: 2.7 },
     hue:     { active: false, speed: 0.15, phase: 0.5 },
   };
   // LFO range definitions: { mid, amp } for sine oscillation
   var lfoRange = {
-    count:   { mid: 7, amp: 2 },
     width:   { mid: 0.55, amp: 0.25 },
     centerR: { mid: 0.20, amp: 0.15 },
     hue:     { mid: 180, amp: 180, wrap: true }, // full spectrum drift
   };
   var lfoFmt = {
-    count:   function(v){ return ''+Math.round(v); },
     width:   function(v){ return v.toFixed(2); },
     centerR: function(v){ return v.toFixed(2); },
     hue:     function(v){ return ''+Math.round(v); },
   };
-  var lfoSliderIds = { count: 's-count', width: 's-width', centerR: 's-center', hue: 's-hue' };
-  var lfoValIds = { count: 'v-count', width: 'v-width', centerR: 'v-center', hue: 'v-hue' };
+  var lfoSliderIds = { width: 's-width', centerR: 's-center', hue: 's-hue' };
+  var lfoValIds = { width: 'v-width', centerR: 'v-center', hue: 'v-hue' };
 
   // Wire LFO toggle buttons
   document.querySelectorAll('.lfo-btn').forEach(function(btn) {
@@ -882,30 +871,19 @@ function initUI() {
     });
   });
 
-  // Start paused
-  var cycling = false;
-  var cycleTimer = null;
-  var btnPause = document.getElementById('btn-pause');
-  btnPause.addEventListener('click', function() {
-    cycling = !cycling;
-    if (cycling) {
-      cycleTimer = setInterval(function() {
-        params.seed = Math.floor(Math.random() * 99999);
-        scheduleRender();
-      }, 250);
-      btnPause.innerHTML = '&#9646;&#9646;';
-    } else {
-      clearInterval(cycleTimer);
-      btnPause.innerHTML = '&#9654;';
-    }
-  });
+  // Continuous morph — seed drifts with time for fluid shape changes
+  // Runs on the LFO tick, no play button needed
 
-  // LFO tick — runs always, only modulates params with active LFO
+  // LFO tick — runs always, morphs shapes + modulates params
   var lfoTime = 0;
   function lfoTick() {
     requestAnimationFrame(lfoTick);
     lfoTime += 0.016;
     var anyActive = false;
+
+    // Continuous seed morphing — fixed drift rate
+    params.seed += 0.02 * params.morphSpeed;
+    scheduleRender();
 
     for (var key in lfoState) {
       if (!lfoState[key].active) continue;
