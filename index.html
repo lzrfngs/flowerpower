@@ -219,7 +219,7 @@ void main() {
   // Where noise is high → wide blur → soft watercolor bleed
   // Where noise is low → tight blur → crisp dried edge
   float blurNoise = fbm(uv * 6.0 + uTime * 0.2 + vec2(42.0, 17.0));
-  float blurSpread = 1.8 + blurNoise * 2.0; // mushy, wide sampling
+  float blurSpread = 1.5 + blurNoise * 1.5; // less needed since buffer is 1/4 res
 
   // ── Step 1: Gaussian blur of the shape buffer ──
   // 9x9 kernel with noise-jittered offsets and variable spread
@@ -291,10 +291,10 @@ void main() {
   // ── Step 3: Threshold — mushy, wide transition zones ──
   // Very wide flowWidth = gradual fade, not on/off.
   // Low flowCenter = petals bleed and merge heavily.
-  float flowCenter = 0.12;
-  float flowWidth = 0.30;
+  float flowCenter = 0.06;
+  float flowWidth = 0.38;
   float noiseShift = (edgeNoise - 0.5) * 0.9 + (fineEdge - 0.5) * 0.2;
-  noiseShift += burstWeight * 0.15;
+  noiseShift += burstWeight * 0.25;
 
   // Clamp threshold floor
   float petalThreshLow = max(flowCenter - flowWidth + noiseShift, 0.04);
@@ -309,15 +309,13 @@ void main() {
   petalMask = petalMask > 0.05 ? petalMask : 0.0;
   gapMask = gapMask > 0.05 ? gapMask : 0.0;
 
-  // ── Step 4: Edge darkening (pigment pooling) ──
-  // Where shape value is low but above threshold = edge zone
-  // Darken there to simulate pigment concentration at drying boundary
-  float petalEdge = 1.0 + 0.5 * (1.0 - petalShape) * petalMask;
-  float gapEdge = 1.0 + 0.4 * (1.0 - gapShape) * gapMask;
+  // ── Step 4: Edge darkening — minimal, no green shift ──
+  float petalEdge = 1.0;
+  float gapEdge = 1.0;
 
-  // ── Step 5: Paper texture ──
-  float grain = fbm(uv * 40.0 + 100.0) * 0.12;
-  float paperBump = fbm(uv * 15.0 + 50.0) * 0.08;
+  // ── Step 5: Paper texture ── (low frequency, subtle)
+  float grain = fbm(uv * 20.0 + 100.0) * 0.06;
+  float paperBump = fbm(uv * 8.0 + 50.0) * 0.04;
 
   // ── Step 6: Composite color ──
   vec3 color = uPaperColor;
@@ -343,23 +341,25 @@ void main() {
   vec3 coolShift = vec3(-0.04, 0.02, 0.06) * (colorMed - 0.5) * 1.5;
   float satShift = (colorFine - 0.5) * 0.2;
 
-  // Gap color with variation
-  float gapAlpha = gapMask * 0.75 * gapEdge;
-  gapAlpha = clamp(gapAlpha + paperBump * gapMask * 0.3, 0.0, 1.0);
+  // Gap color — soft mask, suppress under petals
+  float softGapMask = pow(gapMask, 0.6);
+  float gapAlpha = softGapMask * 0.70;
+  gapAlpha *= max(0.0, 1.0 - petalMask * 1.5);
+  gapAlpha = clamp(gapAlpha, 0.0, 1.0);
   vec3 gapCol = rotateHue(uGapColor, (colorMed - 0.5) * 0.4);
   gapCol = gapCol * (1.0 - grain) * (1.0 + brightnessShift);
-  gapCol += warmShift + coolShift;
-  gapCol = mix(gapCol, gapCol * (1.0 + satShift), 0.4);
+  gapCol = clamp(gapCol, 0.0, 1.0);
   color = mix(color, gapCol, gapAlpha);
 
   // Petal color with per-petal hue shift + spatial variation
-  float petalAlpha = petalMask * 0.85 * petalEdge;
-  petalAlpha = clamp(petalAlpha + paperBump * petalMask * 0.3, 0.0, 1.0);
+  // Soften the mask with pow() so interior fades gradually, no hard contour
+  float softPetalMask = pow(petalMask, 0.6);
+  float petalAlpha = softPetalMask * 0.80;
+  petalAlpha = clamp(petalAlpha, 0.0, 1.0);
   // Per-petal hue rotation + controlled spatial hue variation
   vec3 petalBase = rotateHue(uPetalColor, petalHueAngle + (colorLarge - 0.5) * 0.3);
   vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.5);
-  petalCol += warmShift * 0.5 + coolShift * 0.3;
-  petalCol = mix(petalCol, petalCol * (1.0 + satShift), 0.3);
+  petalCol = clamp(petalCol, 0.0, 1.0);
   color = mix(color, petalCol, petalAlpha);
 
   // Blend petal and gap colors where they overlap — actual wet-on-wet mixing
@@ -369,7 +369,7 @@ void main() {
     vec3 mixedCol = (petalCol * petalMask + gapCol * gapMask) / (petalMask + gapMask + 0.001);
     // Darken the mix (pigments are additive/subtractive in watercolor)
     mixedCol *= 0.75 + (1.0 - overlap) * 0.25;
-    color = mix(color, mixedCol, overlap * 0.6);
+    color = mix(color, mixedCol, overlap * 0.8);
   }
 
   // Paper grain only where paint exists
@@ -437,8 +437,9 @@ function setup() {
   cnv.style('z-index', '0');
   pixelDensity(1);
 
-  // Shape buffer: drawn with p5's 2D renderer
-  shapeBuffer = createGraphics(width, height);
+  // Shape buffer at 1/4 resolution — polygon edges become soft blobs
+  // when the shader samples the upscaled texture. No hard inner contours.
+  shapeBuffer = createGraphics(Math.floor(width/4), Math.floor(height/4));
   shapeBuffer.pixelDensity(1);
 
   // Compile watercolor shader
@@ -453,7 +454,7 @@ function draw() {}
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  shapeBuffer.resizeCanvas(width, height);
+  shapeBuffer.resizeCanvas(Math.floor(width/4), Math.floor(height/4));
   renderBurst();
 }
 
@@ -461,7 +462,7 @@ function windowResized() {
 // Blue channel encodes material: 1.0 = petal, 0.5 = gap, 0.0 = background
 function drawShapesToBuffer() {
   var g = shapeBuffer;
-  var panelH = document.getElementById('panel').offsetHeight;
+  var panelH = document.getElementById('panel').offsetHeight / 4;
   var visH = g.height - panelH;
   var cx = g.width / 2;
   var cy = visH / 2;
@@ -482,9 +483,9 @@ function drawShapesToBuffer() {
   g.fill(0, 0, 128);
   for (var i = 0; i < N; i++) {
     var ca = slice * i + slice * 0.5;
-    var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5 * 0.88;
-    // Gaps use simple wedge shape (no unique bezier)
-    drawSimpleWedge(g, ca, gapHalf, gR, innerR);
+    var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5 * 0.72;
+    // Gaps drawn smaller so their blurred edge doesn't extend past petals
+    drawSimpleWedge(g, ca, gapHalf * 0.75, gR, innerR);
   }
 
   // Draw petals on top — encode per-petal hue shift in red channel
