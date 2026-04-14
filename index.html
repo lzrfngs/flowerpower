@@ -281,18 +281,27 @@ void main() {
   // Fine-scale edge texture
   float fineEdge = fbm(uv * 18.0 + uTime * 0.4 + vec2(33.0, 77.0));
 
-  // ── Step 3: Threshold — this creates the watercolor blowout ──
-  // Large noiseShift = some areas of the petal push WAY beyond the polygon,
-  // others cut in sharply. This is wet paint expanding irregularly.
-  float flowCenter = 0.30;
-  float flowWidth = 0.20;
-  float noiseShift = (edgeNoise - 0.5) * 0.7 + (fineEdge - 0.5) * 0.15;
+  // ── Center-weighted radial burst ──
+  // Distance from center of canvas (0 at center, 1 at edges)
+  vec2 center = vec2(0.5, 0.5);
+  float distFromCenter = length(uv - center) * 2.0;
+  // Invert: strongest near center, fades outward
+  float burstWeight = 1.0 - smoothstep(0.0, 0.8, distFromCenter);
+
+  // ── Step 3: Threshold — blobby merging + radial burst ──
+  // Lower flowCenter = petals bleed together more.
+  // Noise shift boosted near center for burst-out feeling.
+  float flowCenter = 0.18;
+  float flowWidth = 0.18;
+  float noiseShift = (edgeNoise - 0.5) * 0.9 + (fineEdge - 0.5) * 0.2;
+  // Boost noise near center — pushes boundaries outward from the middle
+  noiseShift += burstWeight * 0.15;
 
   // Clamp threshold so it never goes below minimum — prevents phantom shapes in empty space
-  float petalThreshLow = max(flowCenter - flowWidth + noiseShift, 0.08);
-  float petalThreshHigh = max(flowCenter + flowWidth + noiseShift, petalThreshLow + 0.05);
-  float gapThreshLow = max(flowCenter - flowWidth + noiseShift * 0.7, 0.08);
-  float gapThreshHigh = max(flowCenter + flowWidth + noiseShift * 0.7, gapThreshLow + 0.05);
+  float petalThreshLow = max(flowCenter - flowWidth + noiseShift, 0.06);
+  float petalThreshHigh = max(flowCenter + flowWidth + noiseShift, petalThreshLow + 0.04);
+  float gapThreshLow = max(flowCenter - flowWidth + noiseShift * 0.7, 0.06);
+  float gapThreshHigh = max(flowCenter + flowWidth + noiseShift * 0.7, gapThreshLow + 0.04);
 
   float petalMask = smoothstep(petalThreshLow, petalThreshHigh, petalShape);
   float gapMask = smoothstep(gapThreshLow, gapThreshHigh, gapShape);
