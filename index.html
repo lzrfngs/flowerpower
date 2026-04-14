@@ -21,7 +21,6 @@ body {
 }
 canvas.p5Canvas {
   position: fixed !important; top: 0; left: 0; z-index: 0;
-  filter: blur(6px);
 }
 #reg-marks { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
 #reg-marks span {
@@ -197,55 +196,33 @@ function windowResized() {
   renderBurst();
 }
 
-// ── Polygon Subdivision ──────────────────────────────────
-// Two-pass deformation for multi-scale organic shape:
-//   Pass 1: broad silhouette warping (low depth, high variance)
-//   Pass 2: fine edge texture (higher depth, low variance)
-// Per-vertex variance scaling: vertices near the tip (far from
-// center) get reduced displacement so left/right edges converge
-// cleanly instead of diverging.
+// ── Jitter Transform ─────────────────────────────────────
+// Instead of deforming polygon edges (which causes pinching),
+// jitter the ENTIRE shape: random rotation, non-uniform scale,
+// and translation offset. The feathered watercolor edge emerges
+// from layering many slightly-different clean copies.
 
-function subdivideEdge(pts, x1, y1, x2, y2, depth, variance, vdiv) {
-  if (depth <= 0) {
-    pts.push({ x: x2, y: y2 });
-    return;
-  }
-  var rx = (random(-1, 1) + random(-1, 1)) * 0.5 * variance;
-  var ry = (random(-1, 1) + random(-1, 1)) * 0.5 * variance;
-  var mx = (x1 + x2) / 2 + rx;
-  var my = (y1 + y2) / 2 + ry;
-  subdivideEdge(pts, x1, y1, mx, my, depth - 1, variance / vdiv, vdiv);
-  subdivideEdge(pts, mx, my, x2, y2, depth - 1, variance / vdiv, vdiv);
-}
+function jitterPoly(poly, maxR) {
+  // Random rotation
+  var rot = (random(-1, 1) + random(-1, 1)) * 0.5 * 0.06;
+  // Non-uniform scale — stretches/squashes each copy differently
+  var sx = 0.90 + random() * 0.20;
+  var sy = 0.90 + random() * 0.20;
+  // Translation offset
+  var tx = (random(-1, 1) + random(-1, 1)) * 0.5 * maxR * 0.06;
+  var ty = (random(-1, 1) + random(-1, 1)) * 0.5 * maxR * 0.06;
 
-// Deform with per-vertex variance scaling based on distance from origin.
-// tipFalloff: how much to reduce variance at the farthest point (0=full, 1=none)
-function deformPolygon(poly, depth, variance, vdiv, maxDist, tipFalloff) {
+  var cosR = cos(rot), sinR = sin(rot);
   var pts = [];
-  var mD = maxDist || 1;
-  var tF = tipFalloff !== undefined ? tipFalloff : 0.3;
   for (var i = 0; i < poly.length; i++) {
-    var curr = poly[i];
-    var next = poly[(i + 1) % poly.length];
-    pts.push({ x: curr.x, y: curr.y });
-    // Variance scales with distance from center: full at base, reduced at tip
-    var d1 = sqrt(curr.x * curr.x + curr.y * curr.y) / mD;
-    var d2 = sqrt(next.x * next.x + next.y * next.y) / mD;
-    var avgDist = (d1 + d2) / 2;
-    // Scale: 1.0 at center, tF at tip
-    var scale = 1.0 - avgDist * (1.0 - tF);
-    subdivideEdge(pts, curr.x, curr.y, next.x, next.y, depth, variance * scale, vdiv);
+    var x = poly[i].x * sx;
+    var y = poly[i].y * sy;
+    pts.push({
+      x: x * cosR - y * sinR + tx,
+      y: x * sinR + y * cosR + ty
+    });
   }
   return pts;
-}
-
-// Two-pass deformation: broad warp then fine texture
-function deformTwoPasses(poly, maxR) {
-  // Pass 1: broad silhouette — depth 1, large variance for crude sloppy shapes
-  var broad = deformPolygon(poly, 1, maxR * 0.20, 2, maxR, 0.2);
-  // Pass 2: fine edge texture — depth 2, moderate variance
-  var fine = deformPolygon(broad, 2, maxR * 0.07, 3, maxR, 0.4);
-  return fine;
 }
 
 // ── Build a wedge base polygon ───────────────────────────
@@ -324,7 +301,7 @@ function renderBurst() {
   var visH = height - panelH;
   var cx = width / 2;
   var cy = visH / 2;
-  var baseRadius = 0.38 * min(width, visH);
+  var baseRadius = 0.55 * min(width, visH);
 
   noiseSeed(params.seed);
   randomSeed(params.seed);
@@ -373,11 +350,11 @@ function renderBurst() {
       var rough = (petalProps[i].edgeRough + petalProps[(i+1)%N].edgeRough) * 0.5;
       var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
       for (var j = layer; j < layer + batchSize && j < LAYERS; j++) {
-        var deformed = deformTwoPasses(gapBases[i], gR);
+        var jittered = jitterPoly(gapBases[i], gR);
         var hShift = (randomGaussian() * 8);
         var sV = 55 + random(20);
         var bV = 55 + random(25);
-        drawPoly(gfx, deformed, (params.gapHue + hShift + 360) % 360, sV, bV, ALPHA);
+        drawPoly(gfx, jittered, (params.gapHue + hShift + 360) % 360, sV, bV, ALPHA);
       }
     }
 
@@ -386,11 +363,11 @@ function renderBurst() {
       var pp = petalProps[i];
       var pR = baseRadius * pp.lengthMult;
       for (var j = layer; j < layer + batchSize && j < LAYERS; j++) {
-        var deformed = deformTwoPasses(petalBases[i], pR);
+        var jittered = jitterPoly(petalBases[i], pR);
         var hShift = (randomGaussian() * 10);
         var sV = 58 + random(24);
         var bV = 50 + random(28);
-        drawPoly(gfx, deformed, (params.hue + hShift + 360) % 360, sV, bV, ALPHA);
+        drawPoly(gfx, jittered, (params.hue + hShift + 360) % 360, sV, bV, ALPHA);
       }
     }
   }
