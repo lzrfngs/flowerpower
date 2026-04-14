@@ -68,30 +68,6 @@ input[type=range]::-moz-range-thumb {
   border: 1px solid var(--border); flex-shrink: 0;
   align-self: flex-end; margin-bottom: 1px;
 }
-#btn-pause {
-  width: 34px; height: 34px; background: var(--accent); color: var(--cream);
-  border: none; font-size: 12px; cursor: pointer; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0;
-  font-family: inherit; transition: opacity 0.12s; align-self: flex-end;
-}
-#btn-pause:hover { opacity: 0.75; }
-.lfo-btn {
-  width: 18px; height: 18px; background: none; border: 1px solid var(--border);
-  color: var(--dim); font-size: 7px; cursor: pointer; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0;
-  font-family: inherit; transition: all 0.12s; border-radius: 0; padding: 0;
-}
-.lfo-btn.active { background: var(--accent); color: var(--cream); border-color: var(--accent); }
-.lfo-btn:hover { border-color: var(--dim); }
-.lfo-speed {
-  -webkit-appearance: none; appearance: none; width: 40px; height: 2px;
-  background: var(--track); outline: none; cursor: pointer; border-radius: 0;
-}
-.lfo-speed::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 2px; height: 8px;
-  background: var(--accent); border-radius: 0; cursor: pointer;
-}
-.ctrl-row { display: flex; align-items: center; gap: 5px; }
 </style>
 </head>
 <body>
@@ -101,72 +77,49 @@ input[type=range]::-moz-range-thumb {
 
 <div id="panel">
   <div class="ctrl-group">
-    <span class="ctrl-label">Width</span>
+    <span class="ctrl-label">Petals</span>
     <div class="ctrl-with-val">
-      <input type="range" id="s-width" min="0.3" max="0.9" step="0.01" value="0.62">
-      <span class="ctrl-val" id="v-width">0.62</span>
-    </div>
-    <div class="ctrl-row">
-      <button class="lfo-btn" data-lfo="width" title="LFO">&sim;</button>
-      <input type="range" class="lfo-speed" data-lfo-speed="width" min="0.05" max="2" step="0.05" value="0.3">
+      <input type="range" id="s-count" min="5" max="12" step="1" value="8">
+      <span class="ctrl-val" id="v-count">8</span>
     </div>
   </div>
   <div class="ctrl-group">
-    <span class="ctrl-label">Center</span>
+    <span class="ctrl-label">Width</span>
     <div class="ctrl-with-val">
-      <input type="range" id="s-center" min="0" max="0.6" step="0.01" value="0.10">
-      <span class="ctrl-val" id="v-center">0.10</span>
+      <input type="range" id="s-width" min="0.2" max="0.9" step="0.01" value="0.55">
+      <span class="ctrl-val" id="v-width">0.55</span>
     </div>
-    <div class="ctrl-row">
-      <button class="lfo-btn" data-lfo="centerR" title="LFO">&sim;</button>
-      <input type="range" class="lfo-speed" data-lfo-speed="centerR" min="0.05" max="2" step="0.05" value="0.2">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Softness</span>
+    <div class="ctrl-with-val">
+      <input type="range" id="s-soft" min="0.05" max="0.5" step="0.01" value="0.18">
+      <span class="ctrl-val" id="v-soft">0.18</span>
     </div>
   </div>
   <div class="ctrl-group">
     <span class="ctrl-label">Hue</span>
     <div class="ctrl-with-val">
-      <input type="range" id="s-hue" min="0" max="359" step="1" value="42">
-      <span class="ctrl-val" id="v-hue">42</span>
-    </div>
-    <div class="ctrl-row">
-      <button class="lfo-btn" data-lfo="hue" title="LFO">&sim;</button>
-      <input type="range" class="lfo-speed" data-lfo-speed="hue" min="0.05" max="2" step="0.05" value="0.15">
+      <input type="range" id="s-hue" min="0" max="359" step="1" value="38">
+      <span class="ctrl-val" id="v-hue">38</span>
     </div>
   </div>
   <div class="hue-dot" id="hue-preview"></div>
-  <div class="ctrl-group">
-    <span class="ctrl-label">Color Shift</span>
-    <div class="ctrl-with-val">
-      <input type="range" id="s-colorshift" min="0" max="1" step="0.01" value="0.3">
-      <span class="ctrl-val" id="v-colorshift">0.30</span>
-    </div>
-  </div>
-  <div class="ctrl-group">
-    <span class="ctrl-label">Radial Blur</span>
-    <div class="ctrl-with-val">
-      <input type="range" id="s-radblur" min="0" max="1" step="0.01" value="0.0">
-      <span class="ctrl-val" id="v-radblur">0.00</span>
-    </div>
-  </div>
-  <button class="lfo-btn" id="fx-irid" title="Iridescence" style="align-self:flex-end;margin-bottom:1px">&bull;</button>
-  <button class="lfo-btn" id="fx-capillary" title="Capillary" style="align-self:flex-end;margin-bottom:1px">&bull;</button>
 </div>
 
 <script>
 // ─────────────────────────────────────────────────────────
-// Flower Power — GLSL watercolor shader (Luft & Deussen)
+// Flower Power v3 — Sun-Exposed Print
 //
-// Pipeline:
-// 1. Draw clean hard-edged petal wedges to a p5.Graphics buffer
-//    - Red channel = petal hue color (normalized)
-//    - Green channel = gap hue color (normalized)
-//    - Blue channel = material ID (0=bg, 0.5=gap, 1.0=petal)
-// 2. Pass buffer as texture to a GLSL fragment shader
-// 3. Shader: Gaussian blur → distance field → smoothstep threshold
-//    with noise → edge darkening → paper texture → final color
+// Everything computed per-pixel in the fragment shader.
+// No shape buffers, no polygon drawing, no blur-as-SDF.
+// Petal shapes defined as polar math — naturally smooth,
+// infinite resolution, no hard edges to fight.
+//
+// The aesthetic: faded pigment on old paper, chalky,
+// muted, soft — like something left in a window for years.
 // ─────────────────────────────────────────────────────────
 
-// Vertex shader — use p5's built-in matrices for correct positioning
 var vertSrc = `
 attribute vec3 aPosition;
 attribute vec2 aTexCoord;
@@ -179,529 +132,150 @@ void main() {
 }
 `;
 
-// Fragment shader — watercolor treatment
 var fragSrc = `
 precision highp float;
-
 varying vec2 vUv;
-uniform sampler2D uShapeBuffer;
 uniform vec2 uResolution;
 uniform float uTime;
-uniform vec3 uPetalColor;
-uniform vec3 uGapColor;
-uniform vec3 uPaperColor;
+uniform float uPetals;
+uniform float uWidth;
+uniform float uSoftness;
+uniform vec3 uColor1;  // petal color (muted)
+uniform vec3 uColor2;  // gap color (analogous)
+uniform vec3 uPaper;   // paper background
 
-// FX toggles + continuous params
-uniform float uFxIrid;
-uniform float uFxCapillary;
-uniform float uColorShift;
-uniform float uRadialBlur;
-
-// Proper hue rotation in RGB space (rotation around the (1,1,1) axis)
-vec3 rotateHue(vec3 col, float angle) {
-  float cosA = cos(angle);
-  float sinA = sin(angle);
-  // Rodrigues rotation around (1,1,1)/sqrt(3)
-  float oneMinusCos = 1.0 - cosA;
-  float k = 0.57735; // 1/sqrt(3)
-  mat3 m = mat3(
-    cosA + k*k*oneMinusCos,     k*k*oneMinusCos - k*sinA,   k*k*oneMinusCos + k*sinA,
-    k*k*oneMinusCos + k*sinA,   cosA + k*k*oneMinusCos,     k*k*oneMinusCos - k*sinA,
-    k*k*oneMinusCos - k*sinA,   k*k*oneMinusCos + k*sinA,   cosA + k*k*oneMinusCos
-  );
-  return clamp(m * col, 0.0, 1.0);
-}
-
-// Better hash — no directional artifacts from sin(dot()) pattern
-// Uses multiple fract/sin operations with different constants
+// ── Noise ──
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
   p3 += dot(p3, p3.yzx + 33.33);
   return fract((p3.x + p3.y) * p3.z);
 }
 
-float noise2d(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  // Quintic interpolation (smoother than cubic, less banding)
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
   f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  float a = hash(i);
-  float b = hash(i + vec2(1.0, 0.0));
-  float c = hash(i + vec2(0.0, 1.0));
-  float d = hash(i + vec2(1.0, 1.0));
+  float a = hash(i), b = hash(i + vec2(1,0));
+  float c = hash(i + vec2(0,1)), d = hash(i + vec2(1,1));
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-// FBM with non-harmonic octave spacing (Mantle Creep style)
 float fbm(vec2 p) {
   float v = 0.0, a = 0.5;
-  v += noise2d(p) * a; p = p * 2.13 + vec2(173.7, 291.2); a *= 0.5;
-  v += noise2d(p) * a; p = p * 2.07 + vec2(839.3, 428.8); a *= 0.5;
-  v += noise2d(p) * a; p = p * 2.11 + vec2(531.1, 167.7); a *= 0.5;
-  v += noise2d(p) * a; p = p * 2.09 + vec2(947.6, 613.4); a *= 0.5;
-  v += noise2d(p) * a;
+  v += vnoise(p)*a; p = p*2.13 + vec2(173.7, 291.2); a *= 0.5;
+  v += vnoise(p)*a; p = p*2.07 + vec2(839.3, 428.8); a *= 0.5;
+  v += vnoise(p)*a; p = p*2.11 + vec2(531.1, 167.7); a *= 0.5;
+  v += vnoise(p)*a;
   return v;
 }
 
 void main() {
+  // Aspect-corrected coordinates centered at (0,0)
   vec2 uv = vUv;
-  vec2 texel = 1.0 / uResolution;
+  vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
+  vec2 p = (uv - 0.5) * aspect * 2.5; // centered, scaled
 
-  // ── Selective blur: noise-modulated kernel spread ──
-  // Where noise is high → wide blur → soft watercolor bleed
-  // Where noise is low → tight blur → crisp dried edge
-  float blurNoise = fbm(uv * 6.0 + uTime * 0.2 + vec2(42.0, 17.0));
-  float blurSpread = 2.5 + blurNoise * 2.5;
+  // Polar coordinates
+  float r = length(p);
+  float a = atan(p.y, p.x);
 
-  // ── Step 1: Gaussian blur of the shape buffer ──
-  // 9x9 kernel with noise-jittered offsets, variable spread,
-  // and radial stretch from center for outward blur effect
-  float petalShape = 0.0;
-  float gapShape = 0.0;
-  float totalWeight = 0.0;
-  vec2 jitterSeed = uv * 173.7 + vec2(131.1, 97.3);
+  // ── Petal shape function ──
+  // A radial cosine wave creates the petal pattern.
+  // Domain-warped for organic irregularity.
+  float N = uPetals;
+  float warpA = fbm(vec2(a * 2.0, r * 3.0) + uTime * 0.15) * 0.8;
+  float warpR = fbm(vec2(r * 4.0, a * 1.5) + uTime * 0.12 + 500.0) * 0.3;
 
-  // Radial blur: stretch samples outward from center
-  vec2 radDir = normalize(uv - vec2(0.5) + vec2(0.001));
-  float radDist = length(uv - vec2(0.5));
-  // Noise mask for selective radial blur
-  float radMask = uRadialBlur * smoothstep(0.3, 0.7, fbm(uv * 6.0 + uTime * 0.08 + vec2(22.0, 55.0)));
+  // Petal wave: cos(N * angle) gives N petals
+  float petalWave = cos(N * (a + warpA)) * 0.5 + 0.5; // 0-1, peaks at petal centers
+  // Modulate petal reach by the wave
+  float petalReach = 0.6 + petalWave * uWidth * 0.5 + warpR;
 
-  for (int x = -4; x <= 4; x++) {
-    for (int y = -4; y <= 4; y++) {
-      vec2 jitter = vec2(
-        hash(jitterSeed + vec2(float(x) * 7.1, float(y) * 3.3)) - 0.5,
-        hash(jitterSeed + vec2(float(x) * 3.7, float(y) * 11.1)) - 0.5
-      ) * texel;
-      vec2 baseOffset = vec2(float(x), float(y)) * texel * blurSpread + jitter;
-      // Add radial stretch: push samples outward along radial direction
-      vec2 radStretch = radDir * float(x) * texel * radMask * radDist * 25.0;
-      vec2 offset = baseOffset + radStretch;
-      float d2 = float(x*x + y*y);
-      float w = exp(-d2 / 10.0);
-      vec4 s = texture2D(uShapeBuffer, uv + offset);
-      petalShape += w * step(0.7, s.b);
-      gapShape += w * step(0.3, s.b) * (1.0 - step(0.7, s.b));
-      totalWeight += w;
-    }
-  }
-  petalShape /= totalWeight;
-  gapShape /= totalWeight;
+  // Distance from petal boundary (positive = inside, negative = outside)
+  float dist = petalReach - r;
 
-  // Kill faint distance field values far from shapes
-  petalShape = petalShape > 0.02 ? petalShape : 0.0;
-  gapShape = gapShape > 0.02 ? gapShape : 0.0;
+  // ── Soft falloff — the whole look ──
+  // Very wide smoothstep for that faded, out-of-focus print quality.
+  // No hard threshold. Everything dissolves into everything.
+  float soft = uSoftness;
+  float petalMask = smoothstep(-soft, soft * 2.0, dist);
+  float gapMask = smoothstep(-soft * 0.5, soft * 1.5, dist);
+  // Invert gap: strongest where petals are weakest
+  float gapPresence = (1.0 - petalMask) * smoothstep(1.2, 0.3, r);
 
-  // Also sample original hard mask
-  vec4 orig = texture2D(uShapeBuffer, uv);
-  float origPetal = step(0.7, orig.b);
-  float origGap = step(0.3, orig.b) * (1.0 - step(0.7, orig.b));
+  // ── Color mixing ──
+  // Start with paper
+  vec3 color = uPaper;
 
-  // ── Film grain (Mantle Creep technique) ──
-  // Per-pixel noise concentrated at edges — perturbs the distance field
-  // before thresholding so it creates actual threshold crossings at
-  // the paint boundary. Peaks in the transition zone, quiet in solid
-  // areas and empty background.
-  float petalEdgeProximity = 4.0 * petalShape * (1.0 - petalShape); // peaks at 0.5
-  float gapEdgeProximity = 4.0 * gapShape * (1.0 - gapShape);
-  float grainNoise = hash(uv * uResolution + fract(uTime * 137.0)) - 0.5; // per-pixel, per-frame
-  float grainStrength = 0.50;
-  petalShape += grainNoise * grainStrength * petalEdgeProximity;
-  gapShape += grainNoise * grainStrength * gapEdgeProximity;
+  // Per-petal hue variation via noise
+  float hueVar = fbm(vec2(a * 3.0, uTime * 0.1) + 200.0);
+  float hueShift = (hueVar - 0.5) * 0.12; // subtle, within-family
 
-  // Re-clamp after grain perturbation
-  petalShape = max(petalShape, 0.0);
-  gapShape = max(gapShape, 0.0);
+  // Gap color: laid down first, faded
+  vec3 gapCol = uColor2 * (0.85 + fbm(vec2(a*2.0, r*5.0) + 700.0) * 0.3);
+  color = mix(color, gapCol, gapPresence * 0.55);
 
-  // ── Step 2: Domain-warped noise for organic edge variation ──
-  // Higher base frequencies to avoid visible pattern tiling
-  // Large unique offsets prevent any two FBM calls from overlapping
-  vec2 noiseUV = uv * 8.0 + uTime * 0.2 + vec2(173.0, 291.0);
-  float warpX = fbm(noiseUV + vec2(0.0, 0.0));
-  float warpY = fbm(noiseUV + vec2(537.2, 419.3));
-  float edgeNoise = fbm(noiseUV + vec2(warpX, warpY) * 2.5);
-  // Fine-scale edge texture
-  float fineEdge = fbm(uv * 22.0 + uTime * 0.4 + vec2(833.0, 677.0));
+  // Petal color: on top, with gradient from bright center to muted edge
+  float radialGrad = smoothstep(0.0, petalReach * 0.8, r);
+  vec3 petalCol = uColor1;
+  // Center is warmer/brighter, edges are cooler/muted
+  petalCol = mix(petalCol * 1.15, petalCol * 0.7, radialGrad);
+  // Add the subtle hue variation
+  petalCol = mix(petalCol, petalCol.gbr, hueShift);
+  color = mix(color, petalCol, petalMask * 0.8);
 
-  // ── Center-weighted radial burst ──
-  // Distance from center of canvas (0 at center, 1 at edges)
-  vec2 center = vec2(0.5, 0.5);
-  float distFromCenter = length(uv - center) * 2.0;
-  // Invert: strongest near center, fades outward
-  float burstWeight = 1.0 - smoothstep(0.0, 0.8, distFromCenter);
+  // ── Dark pooling at intersections ──
+  // Where gap and petal overlap strongly, pigment concentrates
+  float pooling = petalMask * gapPresence;
+  color *= 1.0 - pooling * 0.35;
 
-  // ── Step 3: Threshold — mushy, wide transition zones ──
-  // Very wide flowWidth = gradual fade, not on/off.
-  // Low flowCenter = petals bleed and merge heavily.
-  float flowCenter = 0.06;
-  float flowWidth = 0.38;
-  float noiseShift = (edgeNoise - 0.5) * 1.4 + (fineEdge - 0.5) * 0.35;
-  noiseShift += burstWeight * 0.25;
+  // ── Paper texture ──
+  // Very subtle, like aged paper fiber
+  float paper = fbm(uv * 30.0 + 1000.0);
+  color *= 0.97 + paper * 0.06;
 
-  // Clamp threshold floor
-  float petalThreshLow = max(flowCenter - flowWidth + noiseShift, 0.04);
-  float petalThreshHigh = max(flowCenter + flowWidth + noiseShift, petalThreshLow + 0.08);
-  float gapThreshLow = max(flowCenter - flowWidth + noiseShift * 0.7, 0.04);
-  float gapThreshHigh = max(flowCenter + flowWidth + noiseShift * 0.7, gapThreshLow + 0.08);
+  // ── Fade to paper at edges (vignette-like) ──
+  float outerFade = smoothstep(1.3, 0.5, r);
+  color = mix(uPaper, color, outerFade);
 
-  float petalMask = smoothstep(petalThreshLow, petalThreshHigh, petalShape);
-  float gapMask = smoothstep(gapThreshLow, gapThreshHigh, gapShape);
-
-  // Hard cutoff: zero out mask values below threshold to keep background clean
-  petalMask = petalMask > 0.05 ? petalMask : 0.0;
-  gapMask = gapMask > 0.05 ? gapMask : 0.0;
-
-  // ── Step 4: Edge darkening ──
-  float petalEdgeDarken = smoothstep(0.1, 0.7, petalShape);
-  float gapEdgeDarken = smoothstep(0.1, 0.7, gapShape);
-
-  // ── Step 5: Paper texture ──
-  float grain = fbm(uv * 20.0 + 100.0) * 0.06;
-  float paperBump = fbm(uv * 8.0 + 50.0) * 0.04;
-
-  // ── Step 6: Composite color ──
-  vec3 color = uPaperColor;
-
-  // Color variation noise
-  float colorLarge = fbm(uv * 3.0 + uTime * 0.05 + vec2(3.1, 7.4));
-  vec2 medUV = uv * 8.0 + uTime * 0.15;
-  float medWarpX = fbm(medUV + vec2(8.9, 2.6));
-  float medWarpY = fbm(medUV + vec2(1.4, 6.3));
-  float colorMed = fbm(medUV + vec2(medWarpX, medWarpY) * 2.0);
-  float colorFine = fbm(uv * 25.0 + 200.0);
-
-  vec4 origSample = texture2D(uShapeBuffer, uv);
-  float petalHueAngle = (origSample.r - 0.5) * 1.6;
-
-  float brightnessShift = (colorLarge - 0.5) * 0.55 + (colorMed - 0.5) * 0.3;
-
-  // Gap color with edge darkening + hue shift at edges
-  float softGapMask = pow(gapMask, 0.6);
-  float gapAlpha = softGapMask * 0.75;
-  gapAlpha *= max(0.0, 1.0 - petalMask * 1.5);
-  gapAlpha = clamp(gapAlpha, 0.0, 1.0);
-  // Hue shifts: edges rotate warm, interior rotates cool, medium noise adds variation
-  float gapHueShift = (1.0 - gapEdgeDarken) * 0.25 + (colorMed - 0.5) * 0.3;
-  vec3 gapCol = rotateHue(uGapColor, gapHueShift);
-  gapCol = gapCol * (1.0 - grain) * (1.0 + brightnessShift);
-  // Edge darkening: deeper, richer version with hue-shifted dark
-  vec3 gapDark = rotateHue(uGapColor, 0.35) * 0.30; // warm-shifted dark
-  gapCol = mix(gapDark, gapCol, gapEdgeDarken);
-  gapCol = clamp(gapCol, 0.0, 1.0);
-  color = mix(color, gapCol, gapAlpha);
-
-  // Petal color with edge darkening + hue shift
-  float softPetalMask = pow(petalMask, 0.6);
-  float petalAlpha = softPetalMask * 0.88;
-  petalAlpha = clamp(petalAlpha, 0.0, 1.0);
-  // Per-petal base hue + spatial variation
-  float petalHueShift = petalHueAngle + (colorLarge - 0.5) * 0.3;
-  // At edges: shift warm (+0.2 rad). At interior: shift cool (-0.15 rad).
-  // Medium noise adds per-area variation within the petal.
-  float edgeHueWarp = (1.0 - petalEdgeDarken) * 0.3 - 0.1 + (colorMed - 0.5) * 0.25;
-  vec3 petalBase = rotateHue(uPetalColor, petalHueShift + edgeHueWarp);
-  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.7);
-  // Dark edge: warm-shifted, deeply saturated version
-  vec3 petalDark = rotateHue(uPetalColor, petalHueShift + 0.4) * 0.28;
-  petalCol = mix(petalDark, petalCol, petalEdgeDarken);
-  petalCol = clamp(petalCol, 0.0, 1.0);
-
-  // ── Capillary action: warm wicks outward, cool pools inward ──
-  if (uFxCapillary > 0.5) {
-    float capillary = smoothstep(0.2, 0.9, petalMask);
-    vec3 warmPull = rotateHue(petalCol, -0.4) * 1.2;
-    vec3 coolPool = rotateHue(petalCol, 0.5) * 0.75;
-    petalCol = mix(mix(coolPool, petalCol, capillary), warmPull, (1.0 - capillary) * 0.45);
-    float gapCap = smoothstep(0.2, 0.9, gapMask);
-    vec3 gapWarm = rotateHue(gapCol, -0.3) * 1.15;
-    vec3 gapCool = rotateHue(gapCol, 0.4) * 0.8;
-    gapCol = mix(mix(gapCool, gapCol, gapCap), gapWarm, (1.0 - gapCap) * 0.4);
-  }
-
-  color = mix(color, petalCol, petalAlpha);
-
-  // Wet-on-wet mixing in overlap zones
-  float overlap = petalMask * gapMask;
-  vec3 mixedCol = (petalCol * petalMask + gapCol * gapMask) / (petalMask + gapMask + 0.001);
-  mixedCol *= 0.75 + (1.0 - overlap) * 0.25;
-  color = mix(color, mixedCol, overlap * 0.8 * step(0.05, overlap));
-
-  float paintPresence = max(petalMask, gapMask);
-
-  // ── Color bleed halos ──
-  float petalHalo = smoothstep(0.0, 0.15, petalShape) * (1.0 - smoothstep(0.15, 0.5, petalShape));
-  float gapHalo = smoothstep(0.0, 0.15, gapShape) * (1.0 - smoothstep(0.15, 0.5, gapShape));
-  vec3 haloCol = clamp(rotateHue(uPetalColor, petalHueAngle) * 1.2, 0.0, 1.0);
-  color = mix(color, haloCol, petalHalo * 0.3);
-  color = mix(color, clamp(uGapColor * 1.15, 0.0, 1.0), gapHalo * 0.25);
-
-  // ── Complementary accents in overlaps ──
-  vec3 compColor = clamp(rotateHue(uPetalColor, 3.14159) * 1.3, 0.0, 1.0);
-  float compStr = overlap * (1.0 - overlap) * 4.0 * step(0.1, overlap) * step(0.55, edgeNoise);
-  color = mix(color, compColor, compStr * 0.25);
-
-  // ── Inner glow ──
-  float glowDist = length(uv - vec2(0.5)) * 2.5;
-  float innerGlow = (1.0 - smoothstep(0.0, 0.6, glowDist)) * paintPresence;
-  vec3 glowColor = clamp(rotateHue(uPetalColor, 0.15) * 1.4 + vec3(0.1, 0.08, 0.02), 0.0, 1.0);
-  color = mix(color, glowColor, innerGlow * 0.35);
-
-  // Paper grain
-  color *= 1.0 - grain * 0.15 * paintPresence;
-
-  // ── Iridescence at edges ──
-  if (uFxIrid > 0.5) {
-    float edgeMag = max(petalEdgeProximity, gapEdgeProximity);
-    float iridAngle = fbm(uv * 12.0 + uTime * 0.1) * 6.28;
-    float iridWeight = edgeMag * paintPresence * 0.6;
-    color = mix(color, rotateHue(color, iridAngle), iridWeight);
-    color += edgeMag * paintPresence * 0.03 * vec3(0.85, 0.92, 1.0);
-  }
-
-  // ── Capillary — applied earlier in petal/gap color section ──
-
-  // ── Color Shift (continuous slider) ──
-  // Only hue rotation + gentle saturation. No brightness math that causes artifacts.
-  if (uColorShift > 0.01) {
-    float cs = uColorShift;
-    float hueWarp = fbm(uv * 5.0 + uTime * 0.15 + vec2(77.0, 33.0));
-    float hueAngle = (hueWarp - 0.5) * cs * 3.0;
-    vec3 shifted = rotateHue(color, hueAngle);
-    // Gentle saturation boost via mix toward more saturated version
-    float lum = dot(shifted, vec3(0.299, 0.587, 0.114));
-    vec3 saturated = clamp(shifted + (shifted - vec3(lum)) * cs * 0.5, 0.0, 1.0);
-    color = mix(color, saturated, paintPresence * cs);
-  }
+  // ── Sun-exposed desaturation ──
+  // Push everything slightly toward the paper tone, as if faded by light
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  vec3 faded = mix(vec3(lum), color, 0.75); // 25% desaturated
+  color = mix(faded, color, smoothstep(0.8, 0.2, r)); // more saturated at center
 
   gl_FragColor = vec4(color, 1.0);
 }
 `;
 
-// ── Parameters ──
 var params = {
-  count: 8, width: 0.62, vary: 1.0, centerR: 0.10,
-  hue: 42, gapHue: 195, seed: 12345, morphSpeed: 0.3,
-  colorShift: 0.3, radialBlur: 0.0
+  count: 8, width: 0.55, softness: 0.18, hue: 38
 };
 
-// FX toggles
-var fx = {
-  irid: 0, capillary: 0
-};
-
-var shapeBuffer = null;
-var watercolorShader = null;
-var renderRAF = null;
-var petalProps = [];
-
-function generatePetalProps() {
-  noiseSeed(42);
-  petalProps = [];
-  var t = params.seed * 0.01; // continuous time dimension for smooth morphing
-  var N = params.count;
-  var v = params.vary;
-  for (var i = 0; i < N; i++) {
-    var ix = i * 7.3; // fixed per-petal offset
-    // 2D noise: (petal index axis, time axis) — smooth in both dimensions
-    var hueShift = (noise(ix + 600, t) - 0.5) * 50;
-
-    // Continuous shape — no archetype switching, just noise-driven control points
-    var right = [
-      { t: 0.0, w: noise(ix+10, t) * 0.35 },
-      { t: 0.12 + noise(ix+40, t) * 0.12, w: 0.3 + noise(ix+11, t) * 0.9 },
-      { t: 0.35 + noise(ix+41, t) * 0.2,  w: 0.4 + noise(ix+12, t) * 0.8 },
-      { t: 0.65 + noise(ix+42, t) * 0.2,  w: 0.2 + noise(ix+13, t) * 0.7 },
-      { t: 1.0, w: noise(ix+14, t) * 0.25 },
-    ];
-
-    var left = [];
-    for (var j = 0; j < right.length; j++) {
-      left.push({
-        t: right[j].t,
-        w: right[j].w * (0.5 + noise(ix + 30 + j * 3, t) * 0.9)
-      });
-    }
-
-    petalProps.push({
-      lengthMult: 0.55 + noise(ix, t) * 0.90 * v + 0.15,
-      angleDrift: (noise(ix + 200, t) - 0.5) * 0.25 * v,
-      curvature:  (noise(ix + 100, t) - 0.5) * 0.60 * v,
-      hueShift:   hueShift,
-      rightPts:   right,
-      leftPts:    left,
-    });
-  }
-}
-
-// ── p5.js lifecycle ──
+var flowerShader;
 
 function setup() {
-  // Use WEBGL for shader support
   var cnv = createCanvas(windowWidth, windowHeight, WEBGL);
   cnv.style('position', 'fixed');
   cnv.style('top', '0');
   cnv.style('left', '0');
   cnv.style('z-index', '0');
   pixelDensity(1);
-
-  // Shape buffer at 1/4 resolution — polygon edges become soft blobs
-  // when the shader samples the upscaled texture. No hard inner contours.
-  shapeBuffer = createGraphics(Math.floor(width/4), Math.floor(height/4));
-  shapeBuffer.pixelDensity(1);
-
-  // Compile watercolor shader
-  watercolorShader = createShader(vertSrc, fragSrc);
-
-  generatePetalProps();
+  flowerShader = createShader(vertSrc, fragSrc);
   initUI();
-  renderBurst();
+  renderFlower();
 }
 
 function draw() {}
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  shapeBuffer.resizeCanvas(Math.floor(width/4), Math.floor(height/4));
-  renderBurst();
+  renderFlower();
 }
 
-// ── Draw clean hard-edged shapes to buffer ──
-// Blue channel encodes material: 1.0 = petal, 0.5 = gap, 0.0 = background
-function drawShapesToBuffer() {
-  var g = shapeBuffer;
-  var panelH = document.getElementById('panel').offsetHeight / 4;
-  var visH = g.height - panelH;
-  var cx = g.width / 2;
-  var cy = visH / 2;
-  var baseRadius = 0.40 * Math.min(g.width, visH);
-  var innerR = baseRadius * params.centerR;
-
-  var N = params.count;
-  var slice = TWO_PI / N;
-  var petalHalf = slice * params.width * 0.5;
-  var gapHalf = (slice - petalHalf * 2) * 0.5 + petalHalf * 0.2;
-
-  g.background(0, 0, 0); // black = no material (blue channel = 0)
-  g.noStroke();
-  g.push();
-  g.translate(cx, cy);
-
-  // Draw gaps first (blue = 0.5 = 128)
-  g.fill(0, 0, 128);
-  for (var i = 0; i < N; i++) {
-    var ca = slice * i + slice * 0.5;
-    var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5 * 0.72;
-    // Gaps drawn smaller so their blurred edge doesn't extend past petals
-    drawSimpleWedge(g, ca, gapHalf * 0.75, gR, innerR);
-  }
-
-  // Draw petals on top — encode per-petal hue shift in red channel
-  for (var i = 0; i < N; i++) {
-    var pp = petalProps[i];
-    var ca = slice * i + pp.angleDrift;
-    var pR = baseRadius * pp.lengthMult;
-    var pH = petalHalf * 1.0;
-    // Red channel = per-petal hue shift (0-255 maps to -30 to +30 degrees)
-    var hueEnc = Math.floor(((pp.hueShift + 30) / 60) * 255);
-    g.fill(hueEnc, 0, 255);
-    drawBezierPetal(g, ca, pH, pR, pp, innerR);
-  }
-
-  g.pop();
-}
-
-// Simple wedge for gaps (no unique shape needed)
-function drawSimpleWedge(g, centerAngle, halfAngle, maxR, innerR) {
-  var segs = 10;
-  var iR = innerR || 0;
-  g.beginShape();
-  g.vertex(Math.cos(centerAngle) * iR, Math.sin(centerAngle) * iR);
-  for (var i = 1; i <= segs; i++) {
-    var t = i / segs;
-    var r = iR + (maxR - iR) * t;
-    var w = Math.sin(t * Math.PI) * 0.85 + 0.15; // smooth bulge
-    var angle = centerAngle + halfAngle * w;
-    g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
-  }
-  for (var i = segs; i >= 1; i--) {
-    var t = i / segs;
-    var r = iR + (maxR - iR) * t;
-    var w = Math.sin(t * Math.PI) * 0.85 + 0.15;
-    var angle = centerAngle - halfAngle * w;
-    g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
-  }
-  g.endShape(CLOSE);
-}
-
-// Unique petal shape built from per-petal bezier control points.
-// Each petal has independently randomized right and left edge profiles,
-// creating fundamentally different silhouettes — fat blobs, thin spikes,
-// curved paddles, asymmetric teardrops.
-function drawBezierPetal(g, centerAngle, halfAngle, maxR, pp, innerR) {
-  var segs = 20;
-  var iR = innerR || 0;
-  var curvature = pp.curvature;
-
-  g.beginShape();
-  // Start at inner radius
-  g.vertex(Math.cos(centerAngle) * iR, Math.sin(centerAngle) * iR);
-
-  // Right edge — interpolate through control points using Catmull-Rom
-  for (var i = 1; i <= segs; i++) {
-    var t = i / segs;
-    var r = iR + (maxR - iR) * t;
-    var w = catmullRomWidth(pp.rightPts, t);
-    var bend = curvature * t * t;
-    var angle = centerAngle + bend + halfAngle * w;
-    g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
-  }
-
-  // Left edge (reverse) — different control points = asymmetric
-  for (var i = segs; i >= 1; i--) {
-    var t = i / segs;
-    var r = iR + (maxR - iR) * t;
-    var w = catmullRomWidth(pp.leftPts, t);
-    var bend = curvature * t * t;
-    var angle = centerAngle + bend - halfAngle * w;
-    g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
-  }
-  g.endShape(CLOSE);
-}
-
-// Catmull-Rom interpolation through width control points.
-// pts: array of {t, w} sorted by t. Returns w at position t.
-function catmullRomWidth(pts, t) {
-  // Find which segment t falls in
-  var idx = 0;
-  for (var i = 0; i < pts.length - 1; i++) {
-    if (t >= pts[i].t && t <= pts[i+1].t) { idx = i; break; }
-  }
-  // Four control points for Catmull-Rom
-  var p0 = pts[Math.max(0, idx - 1)];
-  var p1 = pts[idx];
-  var p2 = pts[Math.min(pts.length - 1, idx + 1)];
-  var p3 = pts[Math.min(pts.length - 1, idx + 2)];
-  // Local t within this segment
-  var segLen = p2.t - p1.t;
-  var lt = segLen > 0.001 ? (t - p1.t) / segLen : 0;
-  // Catmull-Rom interpolation
-  var lt2 = lt * lt;
-  var lt3 = lt2 * lt;
-  return 0.5 * (
-    (2.0 * p1.w) +
-    (-p0.w + p2.w) * lt +
-    (2.0 * p0.w - 5.0 * p1.w + 4.0 * p2.w - p3.w) * lt2 +
-    (-p0.w + 3.0 * p1.w - 3.0 * p2.w + p3.w) * lt3
-  );
-}
-
-// ── HSB to RGB conversion for shader uniforms ──
 function hsbToRgb(h, s, b) {
   h = ((h % 360) + 360) % 360;
   s /= 100; b /= 100;
-  var c = b * s;
-  var x = c * (1 - Math.abs((h / 60) % 2 - 1));
-  var m = b - c;
+  var c = b * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = b - c;
   var r, g, bl;
   if (h < 60) { r=c; g=x; bl=0; }
   else if (h < 120) { r=x; g=c; bl=0; }
@@ -712,34 +286,20 @@ function hsbToRgb(h, s, b) {
   return [r+m, g+m, bl+m];
 }
 
-// ── Core render ──
-function renderBurst() {
-  generatePetalProps();
+function renderFlower() {
+  // Muted, chalky colors — not vivid
+  var col1 = hsbToRgb(params.hue, 55, 70);
+  var col2 = hsbToRgb((params.hue + 55) % 360, 40, 60);
 
-  // 1. Draw clean shapes to buffer
-  drawShapesToBuffer();
-
-  // Gap hue derived from petal hue — analogous harmony (offset 40-80°)
-  params.gapHue = (params.hue + 50 + Math.sin(millis() * 0.0003) * 20) % 360;
-
-  // 2. Convert hues to RGB for shader
-  var petalRgb = hsbToRgb(params.hue, 80, 72);
-  var gapRgb = hsbToRgb(params.gapHue, 70, 65);
-
-  // 3. Apply watercolor shader
-  shader(watercolorShader);
-  watercolorShader.setUniform('uShapeBuffer', shapeBuffer);
-  watercolorShader.setUniform('uResolution', [width, height]);
-  watercolorShader.setUniform('uTime', millis() / 1000.0);
-  watercolorShader.setUniform('uPetalColor', petalRgb);
-  watercolorShader.setUniform('uGapColor', gapRgb);
-  watercolorShader.setUniform('uPaperColor', [0.847, 0.816, 0.753]);
-  watercolorShader.setUniform('uFxIrid', fx.irid);
-  watercolorShader.setUniform('uFxCapillary', fx.capillary);
-  watercolorShader.setUniform('uColorShift', params.colorShift);
-  watercolorShader.setUniform('uRadialBlur', params.radialBlur);
-
-  // Draw a full-screen plane to trigger the fragment shader
+  shader(flowerShader);
+  flowerShader.setUniform('uResolution', [width, height]);
+  flowerShader.setUniform('uTime', millis() / 1000.0);
+  flowerShader.setUniform('uPetals', params.count);
+  flowerShader.setUniform('uWidth', params.width);
+  flowerShader.setUniform('uSoftness', params.softness);
+  flowerShader.setUniform('uColor1', col1);
+  flowerShader.setUniform('uColor2', col2);
+  flowerShader.setUniform('uPaper', [0.847, 0.816, 0.753]);
   noStroke();
   plane(width, height);
 }
@@ -751,26 +311,21 @@ function setFill(el) {
   el.style.setProperty('--fill', pct);
 }
 
-function updatePreviews() {
-  document.getElementById('hue-preview').style.background =
-    'hsl(' + params.hue + ', 75%, 55%)';
-}
-
+var renderRAF = null;
 function scheduleRender() {
   if (renderRAF) return;
   renderRAF = requestAnimationFrame(function() {
-    renderBurst();
+    renderFlower();
     renderRAF = null;
   });
 }
 
 function initUI() {
   var sliders = [
-    { id: 's-width',      key: 'width',      vid: 'v-width',      fmt: function(v){return v.toFixed(2);} },
-    { id: 's-center',     key: 'centerR',    vid: 'v-center',     fmt: function(v){return v.toFixed(2);} },
-    { id: 's-hue',        key: 'hue',        vid: 'v-hue',        fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
-    { id: 's-colorshift', key: 'colorShift', vid: 'v-colorshift', fmt: function(v){return v.toFixed(2);} },
-    { id: 's-radblur',    key: 'radialBlur', vid: 'v-radblur',    fmt: function(v){return v.toFixed(2);} }
+    { id: 's-count', key: 'count', vid: 'v-count', fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
+    { id: 's-width', key: 'width', vid: 'v-width', fmt: function(v){return v.toFixed(2);} },
+    { id: 's-soft',  key: 'softness', vid: 'v-soft', fmt: function(v){return v.toFixed(2);} },
+    { id: 's-hue',   key: 'hue',  vid: 'v-hue',  fmt: function(v){return ''+Math.round(v);}, parse: Math.round }
   ];
 
   sliders.forEach(function(s) {
@@ -782,107 +337,21 @@ function initUI() {
       params[s.key] = val;
       document.getElementById(s.vid).textContent = s.fmt(val);
       setFill(el);
-      updatePreviews();
+      document.getElementById('hue-preview').style.background =
+        'hsl(' + params.hue + ', 55%, 65%)';
       scheduleRender();
     });
   });
 
-  // Per-slider LFO state
-  var lfoState = {
-    width:   { active: false, speed: 0.3, phase: 1.3 },
-    centerR: { active: false, speed: 0.2, phase: 2.7 },
-    hue:     { active: false, speed: 0.15, phase: 0.5 },
-  };
-  // LFO range definitions: { mid, amp } for sine oscillation
-  var lfoRange = {
-    width:   { mid: 0.55, amp: 0.25 },
-    centerR: { mid: 0.20, amp: 0.15 },
-    hue:     { mid: 180, amp: 180, wrap: true }, // full spectrum drift
-  };
-  var lfoFmt = {
-    width:   function(v){ return v.toFixed(2); },
-    centerR: function(v){ return v.toFixed(2); },
-    hue:     function(v){ return ''+Math.round(v); },
-  };
-  var lfoSliderIds = { width: 's-width', centerR: 's-center', hue: 's-hue' };
-  var lfoValIds = { width: 'v-width', centerR: 'v-center', hue: 'v-hue' };
+  document.getElementById('hue-preview').style.background =
+    'hsl(' + params.hue + ', 55%, 65%)';
 
-  // Wire LFO toggle buttons
-  document.querySelectorAll('.lfo-btn').forEach(function(btn) {
-    var key = btn.dataset.lfo;
-    btn.addEventListener('click', function() {
-      lfoState[key].active = !lfoState[key].active;
-      btn.classList.toggle('active', lfoState[key].active);
-    });
-  });
-
-  // Wire LFO speed knobs
-  document.querySelectorAll('.lfo-speed').forEach(function(knob) {
-    var key = knob.dataset.lfoSpeed;
-    knob.value = lfoState[key].speed;
-    knob.addEventListener('input', function() {
-      lfoState[key].speed = parseFloat(knob.value);
-    });
-  });
-
-  // Continuous morph — seed drifts with time for fluid shape changes
-  // Runs on the LFO tick, no play button needed
-
-  // LFO tick — runs always, morphs shapes + modulates params
-  var lfoTime = 0;
-  function lfoTick() {
-    requestAnimationFrame(lfoTick);
-    lfoTime += 0.016;
-    var anyActive = false;
-
-    // Continuous seed morphing — drift rate
-    params.seed += 0.5 * params.morphSpeed;
+  // Continuous slow morph
+  function tick() {
+    requestAnimationFrame(tick);
     scheduleRender();
-
-    for (var key in lfoState) {
-      if (!lfoState[key].active) continue;
-      anyActive = true;
-      var st = lfoState[key];
-      var rng = lfoRange[key];
-      var t = lfoTime * st.speed + st.phase;
-      var val;
-      if (rng.wrap) {
-        // Hue: continuous drift
-        val = (rng.mid + t * rng.amp * 0.1) % 360;
-      } else {
-        val = rng.mid + Math.sin(t) * rng.amp;
-      }
-      // Clamp to slider range
-      var el = document.getElementById(lfoSliderIds[key]);
-      val = Math.max(parseFloat(el.min), Math.min(parseFloat(el.max), val));
-      if (el.step === '1') val = Math.round(val);
-      params[key] = val;
-      el.value = val;
-      setFill(el);
-      document.getElementById(lfoValIds[key]).textContent = lfoFmt[key](val);
-    }
-    if (anyActive) {
-      updatePreviews();
-      scheduleRender();
-    }
   }
-  lfoTick();
-
-  // FX toggle buttons
-  var fxButtons = [
-    { id: 'fx-irid', key: 'irid' },
-    { id: 'fx-capillary', key: 'capillary' }
-  ];
-  fxButtons.forEach(function(f) {
-    var btn = document.getElementById(f.id);
-    btn.addEventListener('click', function() {
-      fx[f.key] = fx[f.key] > 0.5 ? 0.0 : 1.0;
-      btn.classList.toggle('active', fx[f.key] > 0.5);
-      scheduleRender();
-    });
-  });
-
-  updatePreviews();
+  tick();
 }
 </script>
 </body>
