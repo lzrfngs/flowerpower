@@ -21,6 +21,7 @@ body {
 }
 canvas.p5Canvas {
   position: fixed !important; top: 0; left: 0; z-index: 0;
+  filter: blur(6px);
 }
 #reg-marks { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
 #reg-marks span {
@@ -240,10 +241,10 @@ function deformPolygon(poly, depth, variance, vdiv, maxDist, tipFalloff) {
 
 // Two-pass deformation: broad warp then fine texture
 function deformTwoPasses(poly, maxR) {
-  // Pass 1: broad silhouette — depth 1, large variance
-  var broad = deformPolygon(poly, 1, maxR * 0.07, 2, maxR, 0.2);
-  // Pass 2: fine edge texture — depth 2, smaller variance
-  var fine = deformPolygon(broad, 2, maxR * 0.025, 3, maxR, 0.4);
+  // Pass 1: broad silhouette — depth 1, large variance for crude sloppy shapes
+  var broad = deformPolygon(poly, 1, maxR * 0.20, 2, maxR, 0.2);
+  // Pass 2: fine edge texture — depth 2, moderate variance
+  var fine = deformPolygon(broad, 2, maxR * 0.07, 3, maxR, 0.4);
   return fine;
 }
 
