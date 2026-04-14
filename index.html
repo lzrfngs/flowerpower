@@ -399,29 +399,75 @@ function generatePetalProps() {
   var v = params.vary;
   for (var i = 0; i < N; i++) {
     var s = i * 7.3 + params.seed * 0.01;
-    // Per-petal hue shift: each stroke gets its own color drift
-    var hueShift = (noise(s + 600) - 0.5) * 90; // ±45 degrees
+    var hueShift = (noise(s + 600) - 0.5) * 90;
+
+    // Pick a random shape archetype per petal
+    var archetype = Math.floor(noise(s + 700) * 5);
+    var right, left;
+
+    if (archetype === 0) {
+      // FAT BLOB — uniformly wide, rounded tips
+      right = [
+        { t: 0.0, w: 0.2 + noise(s+10)*0.3 },
+        { t: 0.20, w: 0.8 + noise(s+11)*0.5 },
+        { t: 0.50, w: 0.9 + noise(s+12)*0.5 },
+        { t: 0.80, w: 0.7 + noise(s+13)*0.5 },
+        { t: 1.0, w: 0.15 + noise(s+14)*0.2 },
+      ];
+    } else if (archetype === 1) {
+      // THIN NEEDLE — narrow throughout, pointed
+      right = [
+        { t: 0.0, w: 0.05 },
+        { t: 0.15, w: 0.15 + noise(s+11)*0.2 },
+        { t: 0.45, w: 0.2 + noise(s+12)*0.25 },
+        { t: 0.75, w: 0.1 + noise(s+13)*0.15 },
+        { t: 1.0, w: 0.0 },
+      ];
+    } else if (archetype === 2) {
+      // WIDE PADDLE — fat middle, abrupt narrow at base and tip
+      right = [
+        { t: 0.0, w: 0.05 + noise(s+10)*0.1 },
+        { t: 0.12, w: 0.7 + noise(s+11)*0.6 },
+        { t: 0.50, w: 1.0 + noise(s+12)*0.4 },
+        { t: 0.85, w: 0.8 + noise(s+13)*0.4 },
+        { t: 1.0, w: 0.1 + noise(s+14)*0.15 },
+      ];
+    } else if (archetype === 3) {
+      // PINCHED MIDDLE — wide at base and tip, narrow waist
+      right = [
+        { t: 0.0, w: 0.3 + noise(s+10)*0.3 },
+        { t: 0.20, w: 0.6 + noise(s+11)*0.4 },
+        { t: 0.45, w: 0.1 + noise(s+12)*0.2 },
+        { t: 0.70, w: 0.5 + noise(s+13)*0.5 },
+        { t: 1.0, w: 0.2 + noise(s+14)*0.2 },
+      ];
+    } else {
+      // TOP-HEAVY — widest near the tip, like a mushroom or fan
+      right = [
+        { t: 0.0, w: 0.1 + noise(s+10)*0.15 },
+        { t: 0.25, w: 0.2 + noise(s+11)*0.3 },
+        { t: 0.55, w: 0.5 + noise(s+12)*0.5 },
+        { t: 0.80, w: 0.9 + noise(s+13)*0.5 },
+        { t: 1.0, w: 0.3 + noise(s+14)*0.3 },
+      ];
+    }
+
+    // Left side: same archetype but different noise for asymmetry
+    left = [];
+    for (var j = 0; j < right.length; j++) {
+      left.push({
+        t: right[j].t,
+        w: right[j].w * (0.6 + noise(s + 30 + j * 3) * 0.8)
+      });
+    }
+
     petalProps.push({
-      lengthMult: 0.65 + noise(s + 0) * 0.70 * v + 0.15,
+      lengthMult: 0.55 + noise(s + 0) * 0.90 * v + 0.15,
       angleDrift: (noise(s + 200) - 0.5) * 0.25 * v,
-      curvature:  (noise(s + 100) - 0.5) * 0.55 * v,
+      curvature:  (noise(s + 100) - 0.5) * 0.60 * v,
       hueShift:   hueShift,
-      // Right edge: fat blobs, round ends, wild variation
-      // w can go above 1.0 for extra-fat shapes
-      rightPts: [
-        { t: 0.0, w: noise(s+16) * 0.3 },   // base can be wide (not pointed)
-        { t: 0.10 + noise(s+10) * 0.15, w: 0.4 + noise(s+11) * 1.0 },
-        { t: 0.30 + noise(s+12) * 0.25, w: 0.5 + noise(s+13) * 0.9 },
-        { t: 0.60 + noise(s+14) * 0.25, w: 0.2 + noise(s+15) * 0.8 },
-        { t: 1.0, w: noise(s+17) * 0.25 },  // tip can be rounded (not pointed)
-      ],
-      leftPts: [
-        { t: 0.0, w: noise(s+26) * 0.3 },
-        { t: 0.10 + noise(s+20) * 0.15, w: 0.4 + noise(s+21) * 1.0 },
-        { t: 0.30 + noise(s+22) * 0.25, w: 0.5 + noise(s+23) * 0.9 },
-        { t: 0.60 + noise(s+24) * 0.25, w: 0.2 + noise(s+25) * 0.8 },
-        { t: 1.0, w: noise(s+27) * 0.25 },
-      ],
+      rightPts:   right,
+      leftPts:    left,
     });
   }
 }
