@@ -259,16 +259,26 @@ void main() {
   // Start with paper color
   vec3 color = uPaperColor;
 
+  // Domain-warped color variation — shifts hue/brightness within each wash
+  vec2 colorNoiseUV = uv * 5.0 + uTime * 0.1;
+  float colorWarpX = fbm(colorNoiseUV + vec2(3.1, 7.4));
+  float colorWarpY = fbm(colorNoiseUV + vec2(8.9, 2.6));
+  float colorVar = fbm(colorNoiseUV + vec2(colorWarpX, colorWarpY) * 2.0);
+  // Ranges from -0.25 to +0.25 — affects brightness and hue tint
+  float brightnessShift = (colorVar - 0.5) * 0.5;
+  // Warm/cool shift
+  vec3 warmShift = vec3(0.08, -0.03, -0.06) * (colorVar - 0.5) * 2.0;
+
   // Apply gap fill (behind petals)
   float gapAlpha = gapMask * 0.7 * gapEdge;
   gapAlpha = clamp(gapAlpha + paperBump * gapMask * 0.3, 0.0, 1.0);
-  vec3 gapCol = uGapColor * (1.0 - grain);
+  vec3 gapCol = uGapColor * (1.0 - grain) * (1.0 + brightnessShift) + warmShift;
   color = mix(color, gapCol, gapAlpha);
 
   // Apply petals (on top)
   float petalAlpha = petalMask * 0.8 * petalEdge;
   petalAlpha = clamp(petalAlpha + paperBump * petalMask * 0.3, 0.0, 1.0);
-  vec3 petalCol = uPetalColor * (1.0 - grain);
+  vec3 petalCol = uPetalColor * (1.0 - grain) * (1.0 + brightnessShift * 0.8) + warmShift * 0.7;
   color = mix(color, petalCol, petalAlpha);
 
   // Darken overlaps (multiply simulation)
@@ -300,12 +310,30 @@ function generatePetalProps() {
   var N = params.count;
   var v = params.vary;
   for (var i = 0; i < N; i++) {
+    // Each petal gets unique bezier control points for right and left edges.
+    // Points are in polar-ish coords: (t along petal, angular spread).
+    // Randomized per-petal to create fundamentally different silhouettes.
+    var s = i * 7.3 + params.seed * 0.01; // unique noise seed per petal
     petalProps.push({
-      lengthMult: 1.0 + (noise(i * 1.3 + 0) - 0.5) * 0.6 * v,
-      widthMult:  1.0 + (noise(i * 1.3 + 50) - 0.5) * 0.7 * v,
-      curvature:  (noise(i * 1.3 + 100) - 0.5) * 0.30 * v,
-      angleDrift: (noise(i * 1.3 + 200) - 0.5) * 0.15 * v,
-      taper:      0.08 + noise(i * 1.3 + 300) * 0.25,
+      lengthMult: 0.75 + noise(s + 0) * 0.50 * v + 0.25,
+      angleDrift: (noise(s + 200) - 0.5) * 0.20 * v,
+      curvature:  (noise(s + 100) - 0.5) * 0.45 * v,
+      // Right edge: 4 control points (t, spread) — t is 0-1 radially, spread is angular width
+      rightPts: [
+        { t: 0.0, w: 0.0 },
+        { t: 0.15 + noise(s+10) * 0.15, w: 0.3 + noise(s+11) * 0.7 },
+        { t: 0.35 + noise(s+12) * 0.25, w: 0.5 + noise(s+13) * 0.6 },
+        { t: 0.65 + noise(s+14) * 0.20, w: 0.2 + noise(s+15) * 0.6 },
+        { t: 1.0, w: 0.0 },
+      ],
+      // Left edge: independently random — makes petals asymmetric
+      leftPts: [
+        { t: 0.0, w: 0.0 },
+        { t: 0.15 + noise(s+20) * 0.15, w: 0.3 + noise(s+21) * 0.7 },
+        { t: 0.35 + noise(s+22) * 0.25, w: 0.5 + noise(s+23) * 0.6 },
+        { t: 0.65 + noise(s+24) * 0.20, w: 0.2 + noise(s+25) * 0.6 },
+        { t: 1.0, w: 0.0 },
+      ],
     });
   }
 }
@@ -367,7 +395,8 @@ function drawShapesToBuffer() {
   for (var i = 0; i < N; i++) {
     var ca = slice * i + slice * 0.5;
     var gR = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5 * 0.88;
-    drawWedge(g, ca, gapHalf, gR, 0.2, 0, innerR);
+    // Gaps use simple wedge shape (no unique bezier)
+    drawSimpleWedge(g, ca, gapHalf, gR, innerR);
   }
 
   // Draw petals on top (blue = 1.0 = 255)
@@ -376,52 +405,96 @@ function drawShapesToBuffer() {
     var pp = petalProps[i];
     var ca = slice * i + pp.angleDrift;
     var pR = baseRadius * pp.lengthMult;
-    var pH = petalHalf * pp.widthMult;
-    drawWedge(g, ca, pH, pR, pp.taper, pp.curvature, innerR);
+    var pH = petalHalf * 1.0; // width controlled by bezier pts now
+    drawBezierPetal(g, ca, pH, pR, pp, innerR);
   }
 
   g.pop();
 }
 
-function drawWedge(g, centerAngle, halfAngle, maxR, taper, curvature, innerR) {
-  var segs = 12;
+// Simple wedge for gaps (no unique shape needed)
+function drawSimpleWedge(g, centerAngle, halfAngle, maxR, innerR) {
+  var segs = 10;
   var iR = innerR || 0;
   g.beginShape();
-  // Start at inner radius
   g.vertex(Math.cos(centerAngle) * iR, Math.sin(centerAngle) * iR);
-  // Right edge
   for (var i = 1; i <= segs; i++) {
     var t = i / segs;
     var r = iR + (maxR - iR) * t;
-    var wFrac;
-    if (t < 0.30) {
-      var u = t / 0.30;
-      wFrac = u * u * (3 - 2 * u);
-    } else {
-      var u = (t - 0.30) / 0.70;
-      wFrac = (1.0 - u * u) * (1.0 - u * taper);
-    }
-    var bend = curvature * t * t;
-    var angle = centerAngle + bend + halfAngle * wFrac;
+    var w = Math.sin(t * Math.PI) * 0.85 + 0.15; // smooth bulge
+    var angle = centerAngle + halfAngle * w;
     g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
   }
-  // Left edge (reverse)
   for (var i = segs; i >= 1; i--) {
     var t = i / segs;
     var r = iR + (maxR - iR) * t;
-    var wFrac;
-    if (t < 0.30) {
-      var u = t / 0.30;
-      wFrac = u * u * (3 - 2 * u);
-    } else {
-      var u = (t - 0.30) / 0.70;
-      wFrac = (1.0 - u * u) * (1.0 - u * taper);
-    }
-    var bend = curvature * t * t;
-    var angle = centerAngle + bend - halfAngle * wFrac;
+    var w = Math.sin(t * Math.PI) * 0.85 + 0.15;
+    var angle = centerAngle - halfAngle * w;
     g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
   }
   g.endShape(CLOSE);
+}
+
+// Unique petal shape built from per-petal bezier control points.
+// Each petal has independently randomized right and left edge profiles,
+// creating fundamentally different silhouettes — fat blobs, thin spikes,
+// curved paddles, asymmetric teardrops.
+function drawBezierPetal(g, centerAngle, halfAngle, maxR, pp, innerR) {
+  var segs = 20;
+  var iR = innerR || 0;
+  var curvature = pp.curvature;
+
+  g.beginShape();
+  // Start at inner radius
+  g.vertex(Math.cos(centerAngle) * iR, Math.sin(centerAngle) * iR);
+
+  // Right edge — interpolate through control points using Catmull-Rom
+  for (var i = 1; i <= segs; i++) {
+    var t = i / segs;
+    var r = iR + (maxR - iR) * t;
+    var w = catmullRomWidth(pp.rightPts, t);
+    var bend = curvature * t * t;
+    var angle = centerAngle + bend + halfAngle * w;
+    g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
+  }
+
+  // Left edge (reverse) — different control points = asymmetric
+  for (var i = segs; i >= 1; i--) {
+    var t = i / segs;
+    var r = iR + (maxR - iR) * t;
+    var w = catmullRomWidth(pp.leftPts, t);
+    var bend = curvature * t * t;
+    var angle = centerAngle + bend - halfAngle * w;
+    g.vertex(Math.cos(angle) * r, Math.sin(angle) * r);
+  }
+  g.endShape(CLOSE);
+}
+
+// Catmull-Rom interpolation through width control points.
+// pts: array of {t, w} sorted by t. Returns w at position t.
+function catmullRomWidth(pts, t) {
+  // Find which segment t falls in
+  var idx = 0;
+  for (var i = 0; i < pts.length - 1; i++) {
+    if (t >= pts[i].t && t <= pts[i+1].t) { idx = i; break; }
+  }
+  // Four control points for Catmull-Rom
+  var p0 = pts[Math.max(0, idx - 1)];
+  var p1 = pts[idx];
+  var p2 = pts[Math.min(pts.length - 1, idx + 1)];
+  var p3 = pts[Math.min(pts.length - 1, idx + 2)];
+  // Local t within this segment
+  var segLen = p2.t - p1.t;
+  var lt = segLen > 0.001 ? (t - p1.t) / segLen : 0;
+  // Catmull-Rom interpolation
+  var lt2 = lt * lt;
+  var lt3 = lt2 * lt;
+  return 0.5 * (
+    (2.0 * p1.w) +
+    (-p0.w + p2.w) * lt +
+    (2.0 * p0.w - 5.0 * p1.w + 4.0 * p2.w - p3.w) * lt2 +
+    (-p0.w + 3.0 * p1.w - 3.0 * p2.w + p3.w) * lt3
+  );
 }
 
 // ── HSB to RGB conversion for shader uniforms ──
