@@ -256,29 +256,46 @@ void main() {
   float paperBump = fbm(uv * 15.0 + 50.0) * 0.08;
 
   // ── Step 6: Composite color ──
-  // Start with paper color
   vec3 color = uPaperColor;
 
-  // Domain-warped color variation — shifts hue/brightness within each wash
-  vec2 colorNoiseUV = uv * 5.0 + uTime * 0.1;
-  float colorWarpX = fbm(colorNoiseUV + vec2(3.1, 7.4));
-  float colorWarpY = fbm(colorNoiseUV + vec2(8.9, 2.6));
-  float colorVar = fbm(colorNoiseUV + vec2(colorWarpX, colorWarpY) * 2.0);
-  // Ranges from -0.25 to +0.25 — affects brightness and hue tint
-  float brightnessShift = (colorVar - 0.5) * 0.5;
-  // Warm/cool shift
-  vec3 warmShift = vec3(0.08, -0.03, -0.06) * (colorVar - 0.5) * 2.0;
+  // Multi-scale color variation — 3 noise layers at different frequencies
+  // Large: broad warm/cool zones across the whole form
+  float colorLarge = fbm(uv * 3.0 + uTime * 0.05 + vec2(3.1, 7.4));
+  // Medium: mottling within each stroke
+  vec2 medUV = uv * 8.0 + uTime * 0.15;
+  float medWarpX = fbm(medUV + vec2(8.9, 2.6));
+  float medWarpY = fbm(medUV + vec2(1.4, 6.3));
+  float colorMed = fbm(medUV + vec2(medWarpX, medWarpY) * 2.0);
+  // Fine: granular pigment variation
+  float colorFine = fbm(uv * 25.0 + 200.0);
 
-  // Apply gap fill (behind petals)
-  float gapAlpha = gapMask * 0.7 * gapEdge;
+  // Per-petal hue shift from red channel
+  vec4 origSample = texture2D(uShapeBuffer, uv);
+  float petalHueShift = (origSample.r - 0.5) * 0.35; // decoded: ±17% hue rotation
+
+  // Composite brightness + warm/cool + saturation shifts
+  float brightnessShift = (colorLarge - 0.5) * 0.6 + (colorMed - 0.5) * 0.4;
+  vec3 warmShift = vec3(0.12, -0.04, -0.10) * (colorLarge - 0.5) * 2.5;
+  vec3 coolShift = vec3(-0.06, 0.04, 0.12) * (colorMed - 0.5) * 1.5;
+  float satShift = (colorFine - 0.5) * 0.3;
+
+  // Gap color with variation
+  float gapAlpha = gapMask * 0.75 * gapEdge;
   gapAlpha = clamp(gapAlpha + paperBump * gapMask * 0.3, 0.0, 1.0);
-  vec3 gapCol = uGapColor * (1.0 - grain) * (1.0 + brightnessShift) + warmShift;
+  vec3 gapCol = uGapColor * (1.0 - grain) * (1.0 + brightnessShift);
+  gapCol += warmShift + coolShift;
+  gapCol = mix(gapCol, gapCol * (1.0 + satShift), 0.5);
   color = mix(color, gapCol, gapAlpha);
 
-  // Apply petals (on top)
-  float petalAlpha = petalMask * 0.8 * petalEdge;
+  // Petal color with per-petal hue shift + variation
+  float petalAlpha = petalMask * 0.85 * petalEdge;
   petalAlpha = clamp(petalAlpha + paperBump * petalMask * 0.3, 0.0, 1.0);
-  vec3 petalCol = uPetalColor * (1.0 - grain) * (1.0 + brightnessShift * 0.8) + warmShift * 0.7;
+  // Rotate petal color by per-petal hue shift (approximate RGB rotation)
+  vec3 petalBase = uPetalColor;
+  petalBase = mix(petalBase, petalBase.gbr, petalHueShift); // crude hue rotation
+  vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.7);
+  petalCol += warmShift * 0.8 + coolShift * 0.6;
+  petalCol = mix(petalCol, petalCol * (1.0 + satShift), 0.5);
   color = mix(color, petalCol, petalAlpha);
 
   // Darken overlaps (multiply simulation)
@@ -310,29 +327,29 @@ function generatePetalProps() {
   var N = params.count;
   var v = params.vary;
   for (var i = 0; i < N; i++) {
-    // Each petal gets unique bezier control points for right and left edges.
-    // Points are in polar-ish coords: (t along petal, angular spread).
-    // Randomized per-petal to create fundamentally different silhouettes.
-    var s = i * 7.3 + params.seed * 0.01; // unique noise seed per petal
+    var s = i * 7.3 + params.seed * 0.01;
+    // Per-petal hue shift: each stroke gets its own color drift
+    var hueShift = (noise(s + 600) - 0.5) * 60; // ±30 degrees
     petalProps.push({
-      lengthMult: 0.75 + noise(s + 0) * 0.50 * v + 0.25,
-      angleDrift: (noise(s + 200) - 0.5) * 0.20 * v,
-      curvature:  (noise(s + 100) - 0.5) * 0.45 * v,
-      // Right edge: 4 control points (t, spread) — t is 0-1 radially, spread is angular width
+      lengthMult: 0.65 + noise(s + 0) * 0.70 * v + 0.15,
+      angleDrift: (noise(s + 200) - 0.5) * 0.25 * v,
+      curvature:  (noise(s + 100) - 0.5) * 0.55 * v,
+      hueShift:   hueShift,
+      // Right edge: fat blobs, round ends, wild variation
+      // w can go above 1.0 for extra-fat shapes
       rightPts: [
-        { t: 0.0, w: 0.0 },
-        { t: 0.15 + noise(s+10) * 0.15, w: 0.3 + noise(s+11) * 0.7 },
-        { t: 0.35 + noise(s+12) * 0.25, w: 0.5 + noise(s+13) * 0.6 },
-        { t: 0.65 + noise(s+14) * 0.20, w: 0.2 + noise(s+15) * 0.6 },
-        { t: 1.0, w: 0.0 },
+        { t: 0.0, w: noise(s+16) * 0.3 },   // base can be wide (not pointed)
+        { t: 0.10 + noise(s+10) * 0.15, w: 0.4 + noise(s+11) * 1.0 },
+        { t: 0.30 + noise(s+12) * 0.25, w: 0.5 + noise(s+13) * 0.9 },
+        { t: 0.60 + noise(s+14) * 0.25, w: 0.2 + noise(s+15) * 0.8 },
+        { t: 1.0, w: noise(s+17) * 0.25 },  // tip can be rounded (not pointed)
       ],
-      // Left edge: independently random — makes petals asymmetric
       leftPts: [
-        { t: 0.0, w: 0.0 },
-        { t: 0.15 + noise(s+20) * 0.15, w: 0.3 + noise(s+21) * 0.7 },
-        { t: 0.35 + noise(s+22) * 0.25, w: 0.5 + noise(s+23) * 0.6 },
-        { t: 0.65 + noise(s+24) * 0.20, w: 0.2 + noise(s+25) * 0.6 },
-        { t: 1.0, w: 0.0 },
+        { t: 0.0, w: noise(s+26) * 0.3 },
+        { t: 0.10 + noise(s+20) * 0.15, w: 0.4 + noise(s+21) * 1.0 },
+        { t: 0.30 + noise(s+22) * 0.25, w: 0.5 + noise(s+23) * 0.9 },
+        { t: 0.60 + noise(s+24) * 0.25, w: 0.2 + noise(s+25) * 0.8 },
+        { t: 1.0, w: noise(s+27) * 0.25 },
       ],
     });
   }
@@ -399,13 +416,15 @@ function drawShapesToBuffer() {
     drawSimpleWedge(g, ca, gapHalf, gR, innerR);
   }
 
-  // Draw petals on top (blue = 1.0 = 255)
-  g.fill(0, 0, 255);
+  // Draw petals on top — encode per-petal hue shift in red channel
   for (var i = 0; i < N; i++) {
     var pp = petalProps[i];
     var ca = slice * i + pp.angleDrift;
     var pR = baseRadius * pp.lengthMult;
-    var pH = petalHalf * 1.0; // width controlled by bezier pts now
+    var pH = petalHalf * 1.0;
+    // Red channel = per-petal hue shift (0-255 maps to -30 to +30 degrees)
+    var hueEnc = Math.floor(((pp.hueShift + 30) / 60) * 255);
+    g.fill(hueEnc, 0, 255);
     drawBezierPetal(g, ca, pH, pR, pp, innerR);
   }
 
