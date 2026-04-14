@@ -4,13 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Flower Power</title>
-<!--
-  Rendering: p5.js radial brush-stamp technique.
-  Hundreds of overlapping semi-transparent circles simulate wide
-  watercolor brush strokes radiating from center. CSS blur applied
-  to the canvas creates the final painted look.
-  Renders once per parameter change, not 60fps.
--->
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -28,7 +21,8 @@ body {
 }
 canvas.p5Canvas {
   position: fixed !important; top: 0; left: 0; z-index: 0;
-  filter: blur(8px);
+  /* Light blur softens stamp edges without killing detail */
+  filter: blur(3px);
 }
 #reg-marks { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
 #reg-marks span {
@@ -108,10 +102,10 @@ input[type=range]::-moz-range-thumb {
     </div>
   </div>
   <div class="ctrl-group">
-    <span class="ctrl-label">Size</span>
+    <span class="ctrl-label">Variation</span>
     <div class="ctrl-with-val">
-      <input type="range" id="s-size" min="0.25" max="0.60" step="0.01" value="0.38">
-      <span class="ctrl-val" id="v-size">0.38</span>
+      <input type="range" id="s-vary" min="0" max="1" step="0.01" value="0.50">
+      <span class="ctrl-val" id="v-vary">0.50</span>
     </div>
   </div>
   <div class="ctrl-group">
@@ -130,26 +124,61 @@ input[type=range]::-moz-range-thumb {
     </div>
   </div>
   <div class="hue-dot" id="gap-preview"></div>
-  <div class="ctrl-group">
-    <span class="ctrl-label">Softness</span>
-    <div class="ctrl-with-val">
-      <input type="range" id="s-blur" min="2" max="18" step="0.5" value="8">
-      <span class="ctrl-val" id="v-blur">8</span>
-    </div>
-  </div>
   <button id="btn-seed" title="New variation">&#8635;</button>
 </div>
 
 <script>
 // Flower Power - p5.js radial burst
-// Brush-stamp technique: overlapping circles simulate watercolor.
+// Performance-optimized: cached offscreen buffer, debounced renders,
+// pre-baked paper texture, reduced stamp counts, batch noise lookups.
 
 var params = {
-  count: 11, width: 0.62, size: 0.38,
-  hue: 42, gapHue: 195, blur: 8, seed: 12345
+  count: 11, width: 0.62, vary: 0.50,
+  hue: 42, gapHue: 195, softness: 0.50, seed: 12345
 };
 
-var dirty = true;
+// Persistent offscreen buffer — reused, never recreated per render
+var gfx = null;
+// Pre-baked paper texture — generated once
+var paperTex = null;
+
+var petalProps = [];
+var renderRAF = null; // debounce handle
+
+function generatePetalProps() {
+  noiseSeed(params.seed);
+  randomSeed(params.seed);
+  petalProps = [];
+  var N = params.count;
+  var v = params.vary;
+  for (var i = 0; i < N; i++) {
+    petalProps.push({
+      lengthMult:  1.0 + (noise(i * 1.3 + 0)   - 0.5) * 0.6 * v,
+      widthMult:   1.0 + (noise(i * 1.3 + 50)  - 0.5) * 0.7 * v,
+      curvature:   (noise(i * 1.3 + 100) - 0.5) * 0.35 * v,
+      originShift: (noise(i * 1.3 + 150) - 0.5) * 0.12 * v,
+      angleDrift:  (noise(i * 1.3 + 200) - 0.5) * 0.15 * v,
+      stampSize:   0.8 + noise(i * 1.3 + 250) * 0.5,
+      taper:       0.3 + noise(i * 1.3 + 300) * 0.5,
+      dryness:     noise(i * 1.3 + 350),
+    });
+  }
+}
+
+function makePaperTexture(w, h) {
+  var tc = document.createElement('canvas');
+  tc.width = w; tc.height = h;
+  var ctx = tc.getContext('2d');
+  var img = ctx.createImageData(w, h);
+  var d = img.data;
+  // Simple grain in one pass — no p5 overhead
+  for (var i = 0; i < d.length; i += 4) {
+    var v = 200 + (Math.random() * 55) | 0;
+    d[i] = v; d[i+1] = v; d[i+2] = v; d[i+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return tc;
+}
 
 function setup() {
   var cnv = createCanvas(windowWidth, windowHeight);
@@ -161,28 +190,37 @@ function setup() {
   colorMode(HSB, 360, 100, 100, 100);
   noLoop();
   noStroke();
+
+  // Create persistent offscreen buffer
+  gfx = createGraphics(width, height);
+  gfx.pixelDensity(1);
+  gfx.colorMode(HSB, 360, 100, 100, 100);
+  gfx.noStroke();
+
+  // Pre-bake paper texture
+  paperTex = makePaperTexture(width, height);
+
+  generatePetalProps();
   initUI();
   renderBurst();
 }
 
-function draw() {
-  if (dirty) { renderBurst(); dirty = false; }
-}
+function draw() {}
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  gfx.resizeCanvas(width, height);
+  paperTex = makePaperTexture(width, height);
   renderBurst();
 }
 
 // -- Core rendering --
 function renderBurst() {
-  background(40, 8, 92);
-
   var panelH = document.getElementById('panel').offsetHeight;
   var visH = height - panelH;
   var cx = width / 2;
   var cy = visH / 2;
-  var radius = params.size * min(width, visH);
+  var baseRadius = 0.38 * min(width, visH);
 
   noiseSeed(params.seed);
   randomSeed(params.seed);
@@ -192,138 +230,180 @@ function renderBurst() {
   var petalHalf = slice * params.width * 0.5;
   var gapHalf = (slice - petalHalf * 2) * 0.5 + petalHalf * 0.15;
 
-  // Per-petal radius variation for irregular silhouette
-  var radii = [];
-  for (var i = 0; i < N; i++) {
-    radii.push(radius * (0.90 + noise(i * 0.7 + params.seed * 0.01) * 0.18));
-  }
+  // Clear offscreen buffer to white (multiply identity)
+  gfx.background(0, 0, 100);
+  gfx.push();
+  gfx.translate(cx, cy);
 
-  push();
-  translate(cx, cy);
-
-  // 1. Background wash
-  for (var r = radius * 1.15; r > radius * 0.3; r -= 5) {
-    var a = map(r, radius * 1.15, radius * 0.3, 2, 6);
-    fill(params.hue, 20, 82, a);
-    ellipse(0, 0, r * 2, r * 2);
-  }
-
-  // 2. Gap fill
+  // 1. Gap fill strokes
   for (var i = 0; i < N; i++) {
     var ca = slice * i + slice * 0.5;
-    var gr = (radii[i] + radii[(i + 1) % N]) * 0.5;
-    stampWedge(ca, gapHalf, gr, params.gapHue, 0.85, i + 100);
+    var gLen = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
+    var pp = { lengthMult: 1, widthMult: (petalProps[i].widthMult + petalProps[(i+1)%N].widthMult) * 0.5,
+               curvature: 0, originShift: 0, angleDrift: 0,
+               stampSize: 0.9, taper: 0.4, dryness: 0.3 };
+    stampPetal(gfx, ca, gapHalf, gLen, params.gapHue, 0.75, i + 100, pp);
   }
 
-  // 3. Petal strokes
+  // 2. Main petal strokes
   for (var i = 0; i < N; i++) {
-    stampWedge(slice * i, petalHalf, radii[i], params.hue, 1.0, i);
+    var ca = slice * i + petalProps[i].angleDrift;
+    var pLen = baseRadius * petalProps[i].lengthMult;
+    stampPetal(gfx, ca, petalHalf * petalProps[i].widthMult, pLen,
+              params.hue, 1.0, i, petalProps[i]);
   }
 
-  // 4. Accent strokes (thin bristle tracks)
+  // 3. Overlap darkening strokes
   for (var i = 0; i < N; i++) {
-    stampAccent(slice * i, petalHalf * 0.4, radii[i] * 0.92, params.hue, i + 300);
+    var ca = slice * i + petalProps[i].angleDrift;
+    var pLen = baseRadius * petalProps[i].lengthMult;
+    stampOverlap(gfx, ca, petalHalf * 0.3, pLen * 0.7, params.hue, i + 400);
   }
 
-  // 5. Edge pooling
-  for (var i = 0; i < N; i++) {
-    var ga = slice * i + slice * 0.5;
-    var gr = (radii[i] + radii[(i + 1) % N]) * 0.5;
-    stampPooling(ga, gr, params.gapHue, i + 200);
+  gfx.pop();
+
+  // -- Compose to main canvas --
+  background(40, 8, 92);
+
+  // Background wash
+  push();
+  translate(cx, cy);
+  noStroke();
+  for (var r = baseRadius * 1.15; r > baseRadius * 0.2; r -= 8) {
+    var a = map(r, baseRadius * 1.15, baseRadius * 0.2, 1.5, 5);
+    fill(params.hue, 18, 84, a);
+    ellipse(0, 0, r * 2, r * 2);
   }
-
-  // 6. Center bloom
-  stampCenter(radius * 0.22, params.hue);
-
   pop();
 
-  // CSS blur
-  var cnvEl = document.querySelector('canvas.p5Canvas');
-  if (cnvEl) cnvEl.style.filter = 'blur(' + params.blur + 'px)';
+  // Apply multiply buffer TWICE for stronger darkening at overlaps
+  drawingContext.globalCompositeOperation = 'multiply';
+  drawingContext.drawImage(gfx.elt, 0, 0);
+  drawingContext.drawImage(gfx.elt, 0, 0);
+  drawingContext.globalCompositeOperation = 'source-over';
+
+  // Edge pooling + center bloom (normal blend, on top)
+  push();
+  translate(cx, cy);
+  noStroke();
+
+  for (var i = 0; i < N; i++) {
+    var ga = slice * i + slice * 0.5;
+    var gLen = baseRadius * (petalProps[i].lengthMult + petalProps[(i+1)%N].lengthMult) * 0.5;
+    stampPooling(ga, gLen, params.gapHue, i + 200);
+  }
+
+  stampCenter(baseRadius * 0.20, params.hue);
+  pop();
+
+  // Paper texture (pre-baked, single drawImage call)
+  drawingContext.globalCompositeOperation = 'multiply';
+  drawingContext.globalAlpha = 0.045;
+  drawingContext.drawImage(paperTex, 0, 0);
+  drawingContext.globalCompositeOperation = 'source-over';
+  drawingContext.globalAlpha = 1;
 }
 
-// -- Stamp a radial wedge --
-// Fills a wedge with overlapping semi-transparent circles
-// simulating a wide loaded brush dragged outward.
-function stampWedge(centerAngle, halfAngle, maxR, hue, intensity, nOff) {
-  var rSteps = 35;
-  var aSteps = 16;
+// -- Stamp a single petal stroke --
+// PERF: reduced from 38x14 to 24x10 stamps per petal.
+// Noise lookup reduced: one per radial step, reused across angular steps.
+function stampPetal(g, centerAngle, halfAngle, maxR, hue, intensity, nOff, pp) {
+  var rSteps = 24;
+  var aSteps = 10;
+  var baseCR = maxR * 0.060 * pp.stampSize;
+  var originR = maxR * pp.originShift;
 
   for (var ri = 0; ri < rSteps; ri++) {
     var rFrac = ri / rSteps;
-    var r = maxR * (0.04 + rFrac * 0.96);
-    var wMult = sin(rFrac * PI) * 0.65 + 0.35;
-    var cR = maxR * 0.058 * wMult * (0.75 + noise(nOff, ri * 0.25) * 0.65);
+    var curveBend = pp.curvature * rFrac * rFrac;
+    var r = maxR * (0.04 + rFrac * 0.96) + originR * (1 - rFrac);
+
+    var wMult;
+    if (rFrac < 0.3) {
+      wMult = 0.4 + rFrac / 0.3 * 0.6;
+    } else {
+      wMult = 1.0 - (rFrac - 0.3) / 0.7 * (1.0 - pp.taper);
+    }
+
+    var drySkip = pp.dryness * 0.25 * rFrac;
+
+    // Pre-compute noise values for this radial step (avoid per-stamp noise calls)
+    var nRow = noise(nOff, ri * 0.2);
+    var cR = baseCR * wMult * (0.6 + nRow * 0.8);
+    var hRow = (noise(nOff + 10, ri * 0.15) - 0.5) * 25;
+    var sRow = 60 + noise(nOff + 20, ri * 0.08) * 28;
+    var bRow = 55 + noise(nOff + 30, ri * 0.08) * 28;
+    var nABase = (noise(nOff * 3, ri * 0.10) - 0.5) * halfAngle * 0.40;
+    var nRBase = (noise(nOff * 3 + 50, ri * 0.10) - 0.5) * maxR * 0.05;
+
+    var outerFade = rFrac > 0.78 ? (1 - rFrac) / 0.22 * 0.85 + 0.15 : 1;
+    var innerBoost = rFrac < 0.20 ? 1.2 - rFrac / 0.20 * 0.2 : 1;
 
     for (var ai = 0; ai < aSteps; ai++) {
+      if (Math.random() < drySkip) continue;
+
       var aFrac = (ai / (aSteps - 1)) * 2 - 1;
-      var ang = centerAngle + halfAngle * aFrac * wMult;
-      var nA = (noise(nOff * 3, ri * 0.12, ai * 0.18) - 0.5) * halfAngle * 0.45;
-      var nR = (noise(nOff * 3 + 50, ri * 0.12, ai * 0.18) - 0.5) * maxR * 0.055;
-      var px = cos(ang + nA) * (r + nR);
-      var py = sin(ang + nA) * (r + nR);
+      var ang = centerAngle + curveBend + halfAngle * aFrac * wMult;
 
-      var hV = (noise(nOff + 10, ri * 0.18, ai * 0.25) - 0.5) * 22;
-      var sV = 65 + noise(nOff + 20, ri * 0.10, ai * 0.12) * 25;
-      var bV = 50 + noise(nOff + 30, ri * 0.10, ai * 0.12) * 30;
+      // Slight per-stamp angular variation (cheap: use aFrac * nABase)
+      var nA = nABase * (0.7 + aFrac * 0.6);
+      var px = cos(ang + nA) * (r + nRBase);
+      var py = sin(ang + nA) * (r + nRBase);
 
-      var edgeFade = 1 - abs(aFrac) * 0.35;
-      var outerFade = rFrac > 0.80 ? map(rFrac, 0.80, 1, 1, 0.25) : 1;
-      var innerBoost = rFrac < 0.25 ? map(rFrac, 0, 0.25, 1.3, 1) : 1;
-      var alpha = 13 * intensity * edgeFade * outerFade * innerBoost;
+      var edgeFade = 1 - abs(aFrac) * 0.30;
+      var alpha = 11 * intensity * edgeFade * outerFade * innerBoost;
 
-      fill((hue + hV + 360) % 360, sV, bV, alpha);
-      ellipse(px, py, cR * 2, cR * 2);
+      g.fill((hue + hRow + 360) % 360, sRow, bRow, alpha);
+      g.ellipse(px, py, cR * 2, cR * 2);
     }
   }
 }
 
-// -- Accent strokes: thin bristle tracks --
-function stampAccent(centerAngle, halfAngle, maxR, hue, nOff) {
-  var steps = 22;
+// -- Overlap darkening --
+function stampOverlap(g, centerAngle, halfAngle, maxR, hue, nOff) {
+  var steps = 14;
   for (var ri = 0; ri < steps; ri++) {
     var rFrac = ri / steps;
-    var r = maxR * (0.08 + rFrac * 0.92);
-    var cR = maxR * 0.025 * (0.7 + noise(nOff, ri * 0.3) * 0.6);
-    for (var li = 0; li < 3; li++) {
-      var lOff = (li - 1) * halfAngle * 0.35;
-      var nA = (noise(nOff * 2, ri * 0.1, li * 0.5) - 0.5) * halfAngle * 0.3;
+    var r = maxR * (0.15 + rFrac * 0.85);
+    var cR = maxR * 0.022 * (0.7 + noise(nOff, ri * 0.25) * 0.6);
+    var oF = rFrac > 0.70 ? (1 - rFrac) / 0.30 : 1;
+    for (var li = 0; li < 2; li++) {
+      var lOff = (li - 0.5) * halfAngle * 0.4;
+      var nA = (noise(nOff * 2, ri * 0.08, li * 0.5) - 0.5) * halfAngle * 0.25;
       var px = cos(centerAngle + lOff + nA) * r;
       var py = sin(centerAngle + lOff + nA) * r;
-      var hV = (noise(nOff + 15, ri * 0.15, li) - 0.5) * 15;
-      var oF = rFrac > 0.75 ? map(rFrac, 0.75, 1, 1, 0.2) : 1;
-      fill((hue + hV + 5 + 360) % 360, 75, 45, 10 * oF);
-      ellipse(px, py, cR * 2, cR * 2);
+      g.fill((hue + 360) % 360, 72, 40, 8 * oF);
+      g.ellipse(px, py, cR * 2, cR * 2);
     }
   }
 }
 
-// -- Edge pooling: darker marks where paint collects --
+// -- Edge pooling --
 function stampPooling(angle, maxR, hue, nOff) {
-  var poolR = maxR * (0.78 + noise(nOff * 2) * 0.18);
-  var spread = 0.10 + noise(nOff * 2 + 5) * 0.08;
+  var poolR = maxR * (0.72 + noise(nOff * 2) * 0.22);
+  var spread = 0.14 + noise(nOff * 2 + 5) * 0.12;
   for (var i = 0; i < 10; i++) {
-    var aO = (noise(nOff, i * 0.4) - 0.5) * spread;
-    var rO = (noise(nOff + 30, i * 0.4) - 0.5) * maxR * 0.12;
+    var aO = (noise(nOff, i * 0.35) - 0.5) * spread;
+    var rO = (noise(nOff + 30, i * 0.35) - 0.5) * maxR * 0.16;
     var px = cos(angle + aO) * (poolR + rO);
     var py = sin(angle + aO) * (poolR + rO);
-    var cr = maxR * (0.035 + noise(nOff + 80, i) * 0.04);
-    var dH = (hue + 10 + noise(nOff + 90, i) * 15) % 360;
-    fill(dH, 55 + noise(nOff + 95, i) * 20, 30 + noise(nOff + 100, i) * 12, 18);
+    var cr = maxR * (0.025 + noise(nOff + 80, i) * 0.035);
+    var dH = (hue + 8 + noise(nOff + 90, i) * 18) % 360;
+    fill(dH, 40 + noise(nOff + 95, i) * 20, 35 + noise(nOff + 100, i) * 18, 12);
     ellipse(px, py, cr * 2, cr * 2);
   }
 }
 
 // -- Center bloom --
 function stampCenter(radius, hue) {
-  for (var r = radius * 1.5; r > 0; r -= 2.5) {
-    var t = r / (radius * 1.5);
-    fill(hue, 50 + (1 - t) * 25, 72 + (1 - t) * 12, 6 + (1 - t) * 6);
+  for (var r = radius * 1.6; r > 0; r -= 3) {
+    var t = r / (radius * 1.6);
+    fill(hue, 45 + (1 - t) * 28, 74 + (1 - t) * 10, 5 + (1 - t) * 7);
     ellipse(0, 0, r * 2, r * 2);
   }
-  for (var r = radius * 0.5; r > 0; r -= 2) {
-    var t = r / (radius * 0.5);
-    fill((hue + 6) % 360, 70 + (1 - t) * 15, 42 + (1 - t) * 12, 8 + (1 - t) * 12);
+  for (var r = radius * 0.45; r > 0; r -= 2) {
+    var t = r / (radius * 0.45);
+    fill((hue + 5) % 360, 68 + (1 - t) * 18, 38 + (1 - t) * 14, 10 + (1 - t) * 14);
     ellipse(0, 0, r * 2, r * 2);
   }
 }
@@ -342,16 +422,24 @@ function updatePreviews() {
     'hsl(' + params.gapHue + ', 60%, 55%)';
 }
 
-function scheduleRender() { dirty = true; redraw(); }
+// Debounced render — slider events fire dozens of times per drag.
+// We only render once per animation frame.
+function scheduleRender() {
+  generatePetalProps();
+  if (renderRAF) return; // already scheduled
+  renderRAF = requestAnimationFrame(function() {
+    renderBurst();
+    renderRAF = null;
+  });
+}
 
 function initUI() {
   var sliders = [
-    { id: 's-count', key: 'count', vid: 'v-count', fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
-    { id: 's-width', key: 'width', vid: 'v-width', fmt: function(v){return v.toFixed(2);} },
-    { id: 's-size',  key: 'size',  vid: 'v-size',  fmt: function(v){return v.toFixed(2);} },
-    { id: 's-hue',   key: 'hue',   vid: 'v-hue',   fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
-    { id: 's-gap',   key: 'gapHue',vid: 'v-gap',   fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
-    { id: 's-blur',  key: 'blur',  vid: 'v-blur',  fmt: function(v){return ''+v;} }
+    { id: 's-count', key: 'count',  vid: 'v-count', fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
+    { id: 's-width', key: 'width',  vid: 'v-width', fmt: function(v){return v.toFixed(2);} },
+    { id: 's-vary',  key: 'vary',   vid: 'v-vary',  fmt: function(v){return v.toFixed(2);} },
+    { id: 's-hue',   key: 'hue',    vid: 'v-hue',   fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
+    { id: 's-gap',   key: 'gapHue', vid: 'v-gap',   fmt: function(v){return ''+Math.round(v);}, parse: Math.round }
   ];
 
   sliders.forEach(function(s) {
