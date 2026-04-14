@@ -281,7 +281,7 @@ void main() {
   float petalEdgeProximity = 4.0 * petalShape * (1.0 - petalShape); // peaks at 0.5
   float gapEdgeProximity = 4.0 * gapShape * (1.0 - gapShape);
   float grainNoise = hash(uv * uResolution + fract(uTime * 137.0)) - 0.5; // per-pixel, per-frame
-  float grainStrength = 0.25;
+  float grainStrength = 0.35;
   petalShape += grainNoise * grainStrength * petalEdgeProximity;
   gapShape += grainNoise * grainStrength * gapEdgeProximity;
 
@@ -310,7 +310,7 @@ void main() {
   // Low flowCenter = petals bleed and merge heavily.
   float flowCenter = 0.06;
   float flowWidth = 0.38;
-  float noiseShift = (edgeNoise - 0.5) * 0.9 + (fineEdge - 0.5) * 0.2;
+  float noiseShift = (edgeNoise - 0.5) * 1.1 + (fineEdge - 0.5) * 0.25;
   noiseShift += burstWeight * 0.25;
 
   // Clamp threshold floor
@@ -410,6 +410,36 @@ void main() {
 
   // Paper grain
   color *= 1.0 - grain * 0.15 * paintPresence;
+
+  // ── Solarization ──
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  float solarMask = sin(lum * 3.14159) * paintPresence;
+  vec3 solarized = rotateHue(1.0 - color, 0.5);
+  color = mix(color, solarized, solarMask * 0.15);
+
+  // ── Iridescence at edges (Mantle Creep) ──
+  // Edge gradient drives hue shift — thin-film shimmer at paint boundaries
+  float edgeMag = max(petalEdgeProximity, gapEdgeProximity);
+  float iridAngle = fbm(uv * 12.0 + uTime * 0.1) * 6.28;
+  float iridWeight = edgeMag * paintPresence * 0.6;
+  color = mix(color, rotateHue(color, iridAngle), iridWeight);
+  color += edgeMag * paintPresence * 0.03 * vec3(0.85, 0.92, 1.0);
+
+  // ── Accent patches (Mantle Creep) ──
+  // FBM blob field: organic patches of shifted accent color at transitions
+  float patchField = fbm(uv * 4.0 + uTime * 0.02 + vec2(50.0, 25.0));
+  float patchMask = smoothstep(0.48, 0.65, patchField) * paintPresence;
+  vec3 accentCol = rotateHue(uPetalColor, 1.5) * 0.9;
+  color = mix(color, accentCol, patchMask * edgeMag * 0.4);
+
+  // ── Surface relief (Mantle Creep) ──
+  // Paint thickness as height map — specular highlight on pooled edges
+  float relief = max(petalShape, gapShape);
+  vec2 gradR = vec2(dFdx(relief), dFdy(relief));
+  vec3 surfNorm = normalize(vec3(-gradR * 8.0, 1.0));
+  vec3 lightDir = normalize(vec3(0.5, 0.3, 1.0));
+  float spec = pow(max(0.0, dot(surfNorm, lightDir)), 16.0);
+  color += spec * paintPresence * 0.12 * vec3(1.0, 0.97, 0.90);
 
   gl_FragColor = vec4(color, 1.0);
 }
