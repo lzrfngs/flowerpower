@@ -232,17 +232,14 @@ float noise2d(vec2 p) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-// FBM with rotation per octave to break axis-aligned patterns
+// FBM with non-harmonic octave spacing (Mantle Creep style)
 float fbm(vec2 p) {
-  float v = 0.0;
-  float amp = 0.5;
-  // Rotation matrix (~37 degrees) applied per octave
-  mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
-  for (int i = 0; i < 5; i++) {
-    v += amp * noise2d(p);
-    p = rot * p * 2.1 + vec2(100.0);
-    amp *= 0.5;
-  }
+  float v = 0.0, a = 0.5;
+  v += noise2d(p) * a; p = p * 2.13 + vec2(173.7, 291.2); a *= 0.5;
+  v += noise2d(p) * a; p = p * 2.07 + vec2(839.3, 428.8); a *= 0.5;
+  v += noise2d(p) * a; p = p * 2.11 + vec2(531.1, 167.7); a *= 0.5;
+  v += noise2d(p) * a; p = p * 2.09 + vec2(947.6, 613.4); a *= 0.5;
+  v += noise2d(p) * a;
   return v;
 }
 
@@ -254,7 +251,7 @@ void main() {
   // Where noise is high → wide blur → soft watercolor bleed
   // Where noise is low → tight blur → crisp dried edge
   float blurNoise = fbm(uv * 6.0 + uTime * 0.2 + vec2(42.0, 17.0));
-  float blurSpread = 1.5 + blurNoise * 1.5; // less needed since buffer is 1/4 res
+  float blurSpread = 2.5 + blurNoise * 2.5;
 
   // ── Step 1: Gaussian blur of the shape buffer ──
   // 9x9 kernel with noise-jittered offsets, variable spread,
@@ -308,7 +305,7 @@ void main() {
   float petalEdgeProximity = 4.0 * petalShape * (1.0 - petalShape); // peaks at 0.5
   float gapEdgeProximity = 4.0 * gapShape * (1.0 - gapShape);
   float grainNoise = hash(uv * uResolution + fract(uTime * 137.0)) - 0.5; // per-pixel, per-frame
-  float grainStrength = 0.35;
+  float grainStrength = 0.50;
   petalShape += grainNoise * grainStrength * petalEdgeProximity;
   gapShape += grainNoise * grainStrength * gapEdgeProximity;
 
@@ -317,13 +314,14 @@ void main() {
   gapShape = max(gapShape, 0.0);
 
   // ── Step 2: Domain-warped noise for organic edge variation ──
-  // Two scales: large blowout zones + fine edge texture
-  vec2 noiseUV = uv * 4.0 + uTime * 0.2;
+  // Higher base frequencies to avoid visible pattern tiling
+  // Large unique offsets prevent any two FBM calls from overlapping
+  vec2 noiseUV = uv * 8.0 + uTime * 0.2 + vec2(173.0, 291.0);
   float warpX = fbm(noiseUV + vec2(0.0, 0.0));
-  float warpY = fbm(noiseUV + vec2(5.2, 1.3));
+  float warpY = fbm(noiseUV + vec2(537.2, 419.3));
   float edgeNoise = fbm(noiseUV + vec2(warpX, warpY) * 2.5);
   // Fine-scale edge texture
-  float fineEdge = fbm(uv * 18.0 + uTime * 0.4 + vec2(33.0, 77.0));
+  float fineEdge = fbm(uv * 22.0 + uTime * 0.4 + vec2(833.0, 677.0));
 
   // ── Center-weighted radial burst ──
   // Distance from center of canvas (0 at center, 1 at edges)
@@ -337,7 +335,7 @@ void main() {
   // Low flowCenter = petals bleed and merge heavily.
   float flowCenter = 0.06;
   float flowWidth = 0.38;
-  float noiseShift = (edgeNoise - 0.5) * 1.1 + (fineEdge - 0.5) * 0.25;
+  float noiseShift = (edgeNoise - 0.5) * 1.4 + (fineEdge - 0.5) * 0.35;
   noiseShift += burstWeight * 0.25;
 
   // Clamp threshold floor
@@ -463,20 +461,16 @@ void main() {
   // ── Capillary — applied earlier in petal/gap color section ──
 
   // ── Color Shift (continuous slider) ──
-  // Rotates hue, shifts saturation, warps brightness based on noise + slider
-  // At 0 = no effect. At 1 = dramatic psychedelic color warping.
+  // Only hue rotation + gentle saturation. No brightness math that causes artifacts.
   if (uColorShift > 0.01) {
     float cs = uColorShift;
-    // Domain-warped hue rotation — different areas shift differently
     float hueWarp = fbm(uv * 5.0 + uTime * 0.15 + vec2(77.0, 33.0));
-    float hueAngle = (hueWarp - 0.5) * cs * 3.0; // up to ±1.5 radians at max
-    color = mix(color, rotateHue(color, hueAngle), paintPresence * cs);
-    // Brightness contrast boost
-    float lum = dot(color, vec3(0.299, 0.587, 0.114));
-    color = mix(color, color * (0.5 + lum * 1.5), cs * 0.4 * paintPresence);
-    // Saturation push — colors get more vivid
-    vec3 grey = vec3(lum);
-    color = mix(color, mix(grey, color, 1.0 + cs * 0.8), paintPresence);
+    float hueAngle = (hueWarp - 0.5) * cs * 3.0;
+    vec3 shifted = rotateHue(color, hueAngle);
+    // Gentle saturation boost via mix toward more saturated version
+    float lum = dot(shifted, vec3(0.299, 0.587, 0.114));
+    vec3 saturated = clamp(shifted + (shifted - vec3(lum)) * cs * 0.5, 0.0, 1.0);
+    color = mix(color, saturated, paintPresence * cs);
   }
 
   gl_FragColor = vec4(color, 1.0);
