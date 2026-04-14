@@ -89,8 +89,8 @@ input[type=range]::-moz-range-thumb {
   <div class="ctrl-group">
     <span class="ctrl-label">Petals</span>
     <div class="ctrl-with-val">
-      <input type="range" id="s-count" min="5" max="16" step="1" value="11">
-      <span class="ctrl-val" id="v-count">11</span>
+      <input type="range" id="s-count" min="5" max="9" step="1" value="7">
+      <span class="ctrl-val" id="v-count">7</span>
     </div>
   </div>
   <div class="ctrl-group">
@@ -133,7 +133,7 @@ input[type=range]::-moz-range-thumb {
 // smooth continuous tone. ~80 shape fills total vs thousands of ellipses.
 
 var params = {
-  count: 11, width: 0.62, vary: 0.50,
+  count: 7, width: 0.62, vary: 0.50,
   hue: 42, gapHue: 195, seed: 12345
 };
 
@@ -211,31 +211,35 @@ function windowResized() {
 // edgeSegs: number of segments along each side of the wedge.
 function buildWedge(centerAngle, halfAngle, maxR, taper, curvature, edgeRough, nOff, layerSeed) {
   var pts = [];
-  var segs = 18; // vertices per side — enough for smooth noise distortion
+  var segs = 28; // more segments for smooth spline curves
 
-  // Start at center (slight offset inward)
+  // Start at center
   pts.push({ x: 0, y: 0 });
 
-  // Right edge: center → tip
+  // Right edge: center -> tip
   for (var i = 0; i <= segs; i++) {
     var t = i / segs; // 0 at center, 1 at tip
     var r = maxR * t;
 
-    // Width profile: narrow at base, widest around 35%, tapers to tip
+    // Width profile: ease in, peak around 30%, then power-curve taper to pointed tip
     var wFrac;
-    if (t < 0.35) {
-      wFrac = t / 0.35;
+    if (t < 0.30) {
+      // Smooth ease-in from center
+      var u = t / 0.30;
+      wFrac = u * u * (3 - 2 * u); // smoothstep
     } else {
-      wFrac = 1.0 - (t - 0.35) / 0.65 * (1.0 - taper);
+      // Power curve to tip — drops to near-zero
+      var u = (t - 0.30) / 0.70;
+      wFrac = (1.0 - u * u) * (1.0 - u * taper);
     }
 
     // Curvature: angle bends outward
     var bend = curvature * t * t;
 
-    // Noise distortion on the radius (organic edge)
-    var nR = (noise(nOff * 2 + layerSeed, i * 0.3, 0) - 0.5) * maxR * 0.12 * edgeRough;
-    // Noise distortion on the angle
-    var nA = (noise(nOff * 2 + layerSeed, i * 0.3, 10) - 0.5) * halfAngle * 0.25 * edgeRough;
+    // Noise distortion — amplified toward the tip for organic splay
+    var tipAmp = 1 + t * t * 2.5; // 1x at center, 3.5x at tip
+    var nR = (noise(nOff * 2 + layerSeed, i * 0.25, 0) - 0.5) * maxR * 0.14 * edgeRough * tipAmp;
+    var nA = (noise(nOff * 2 + layerSeed, i * 0.25, 10) - 0.5) * halfAngle * 0.30 * edgeRough * tipAmp;
 
     var angle = centerAngle + bend + halfAngle * wFrac + nA;
     var dist = r + nR;
@@ -243,21 +247,24 @@ function buildWedge(centerAngle, halfAngle, maxR, taper, curvature, edgeRough, n
     pts.push({ x: cos(angle) * dist, y: sin(angle) * dist });
   }
 
-  // Left edge: tip → center (reverse direction)
+  // Left edge: tip -> center (reverse direction)
   for (var i = segs; i >= 0; i--) {
     var t = i / segs;
     var r = maxR * t;
 
     var wFrac;
-    if (t < 0.35) {
-      wFrac = t / 0.35;
+    if (t < 0.30) {
+      var u = t / 0.30;
+      wFrac = u * u * (3 - 2 * u);
     } else {
-      wFrac = 1.0 - (t - 0.35) / 0.65 * (1.0 - taper);
+      var u = (t - 0.30) / 0.70;
+      wFrac = (1.0 - u * u) * (1.0 - u * taper);
     }
 
     var bend = curvature * t * t;
-    var nR = (noise(nOff * 2 + layerSeed, i * 0.3, 20) - 0.5) * maxR * 0.12 * edgeRough;
-    var nA = (noise(nOff * 2 + layerSeed, i * 0.3, 30) - 0.5) * halfAngle * 0.25 * edgeRough;
+    var tipAmp = 1 + t * t * 2.5;
+    var nR = (noise(nOff * 2 + layerSeed, i * 0.25, 20) - 0.5) * maxR * 0.14 * edgeRough * tipAmp;
+    var nA = (noise(nOff * 2 + layerSeed, i * 0.25, 30) - 0.5) * halfAngle * 0.30 * edgeRough * tipAmp;
 
     var angle = centerAngle + bend - halfAngle * wFrac + nA;
     var dist = r + nR;
@@ -269,12 +276,17 @@ function buildWedge(centerAngle, halfAngle, maxR, taper, curvature, edgeRough, n
 }
 
 // -- Draw a filled wedge polygon on a graphics context --
+// Uses curveVertex for smooth spline interpolation between points
 function drawWedge(g, pts, h, s, b, a) {
   g.fill(h, s, b, a);
   g.beginShape();
+  // Repeat first point for curveVertex (it needs a control point before the start)
+  g.curveVertex(pts[0].x, pts[0].y);
   for (var i = 0; i < pts.length; i++) {
-    g.vertex(pts[i].x, pts[i].y);
+    g.curveVertex(pts[i].x, pts[i].y);
   }
+  // Repeat last point for closing control
+  g.curveVertex(pts[pts.length-1].x, pts[pts.length-1].y);
   g.endShape(CLOSE);
 }
 
@@ -282,9 +294,11 @@ function drawWedge(g, pts, h, s, b, a) {
 function drawWedgeMain(pts, h, s, b, a) {
   fill(h, s, b, a);
   beginShape();
+  curveVertex(pts[0].x, pts[0].y);
   for (var i = 0; i < pts.length; i++) {
-    vertex(pts[i].x, pts[i].y);
+    curveVertex(pts[i].x, pts[i].y);
   }
+  curveVertex(pts[pts.length-1].x, pts[pts.length-1].y);
   endShape(CLOSE);
 }
 
