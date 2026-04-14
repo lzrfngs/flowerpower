@@ -16,6 +16,7 @@
 }
 body {
   background: var(--cream);
+  background-color: #F2EBE0;
   font-family: 'IBM Plex Mono', monospace;
   width: 100vw; height: 100vh; overflow: hidden; color: var(--text);
 }
@@ -113,13 +114,12 @@ input[type=range]::-moz-range-thumb {
   </div>
   <div class="hue-dot" id="hue-preview"></div>
   <div class="ctrl-group">
-    <span class="ctrl-label">Gap Hue</span>
+    <span class="ctrl-label">Speed</span>
     <div class="ctrl-with-val">
-      <input type="range" id="s-gap" min="0" max="359" step="1" value="195">
-      <span class="ctrl-val" id="v-gap">195</span>
+      <input type="range" id="s-speed" min="0" max="1" step="0.01" value="0.3">
+      <span class="ctrl-val" id="v-speed">0.30</span>
     </div>
   </div>
-  <div class="hue-dot" id="gap-preview"></div>
   <button id="btn-pause" title="Play">&#9654;</button>
 </div>
 
@@ -383,7 +383,7 @@ void main() {
 // ── Parameters ──
 var params = {
   count: 7, width: 0.62, vary: 1.0, centerR: 0.10,
-  hue: 42, gapHue: 195, seed: 12345
+  hue: 42, gapHue: 195, seed: 12345, speed: 0.3
 };
 
 var shapeBuffer = null;
@@ -658,9 +658,12 @@ function renderBurst() {
   // 1. Draw clean shapes to buffer
   drawShapesToBuffer();
 
-  // 2. Convert hues to RGB for shader — vivid, saturated colors
-  var petalRgb = hsbToRgb(params.hue, 90, 75);
-  var gapRgb = hsbToRgb(params.gapHue, 80, 70);
+  // Gap hue derived from petal hue — analogous harmony (offset 40-80°)
+  params.gapHue = (params.hue + 50 + Math.sin(millis() * 0.0003) * 20) % 360;
+
+  // 2. Convert hues to RGB for shader
+  var petalRgb = hsbToRgb(params.hue, 80, 72);
+  var gapRgb = hsbToRgb(params.gapHue, 70, 65);
 
   // 3. Apply watercolor shader
   shader(watercolorShader);
@@ -669,7 +672,7 @@ function renderBurst() {
   watercolorShader.setUniform('uTime', millis() / 1000.0);
   watercolorShader.setUniform('uPetalColor', petalRgb);
   watercolorShader.setUniform('uGapColor', gapRgb);
-  watercolorShader.setUniform('uPaperColor', [0.918, 0.894, 0.847]); // cream
+  watercolorShader.setUniform('uPaperColor', [0.95, 0.92, 0.87]); // warm cream
 
   // Draw a full-screen plane to trigger the fragment shader
   noStroke();
@@ -686,8 +689,6 @@ function setFill(el) {
 function updatePreviews() {
   document.getElementById('hue-preview').style.background =
     'hsl(' + params.hue + ', 75%, 55%)';
-  document.getElementById('gap-preview').style.background =
-    'hsl(' + params.gapHue + ', 60%, 55%)';
 }
 
 function scheduleRender() {
@@ -704,7 +705,7 @@ function initUI() {
     { id: 's-width',  key: 'width',   vid: 'v-width',  fmt: function(v){return v.toFixed(2);} },
     { id: 's-center', key: 'centerR', vid: 'v-center', fmt: function(v){return v.toFixed(2);} },
     { id: 's-hue',    key: 'hue',     vid: 'v-hue',    fmt: function(v){return ''+Math.round(v);}, parse: Math.round },
-    { id: 's-gap',    key: 'gapHue',  vid: 'v-gap',    fmt: function(v){return ''+Math.round(v);}, parse: Math.round }
+    { id: 's-speed',  key: 'speed',   vid: 'v-speed',  fmt: function(v){return v.toFixed(2);} }
   ];
 
   sliders.forEach(function(s) {
@@ -738,6 +739,41 @@ function initUI() {
       btnPause.innerHTML = '&#9654;';
     }
   });
+
+  // LFO animation loop — sine waves modulate parameters
+  var lfoTime = 0;
+  function lfoTick() {
+    requestAnimationFrame(lfoTick);
+    if (!cycling) return;
+    lfoTime += 0.016;
+    var spd = params.speed;
+    if (spd < 0.01) return;
+
+    var el, val;
+
+    // Width: slow oscillation
+    val = 0.55 + Math.sin(lfoTime * spd * 1.2) * 0.25;
+    params.width = val;
+    el = document.getElementById('s-width');
+    el.value = val; setFill(el);
+    document.getElementById('v-width').textContent = val.toFixed(2);
+
+    // Center: very slow
+    val = 0.20 + Math.sin(lfoTime * spd * 0.7 + 1.5) * 0.15;
+    params.centerR = val;
+    el = document.getElementById('s-center');
+    el.value = val; setFill(el);
+    document.getElementById('v-center').textContent = val.toFixed(2);
+
+    // Hue: drifts slowly through the spectrum
+    val = (42 + lfoTime * spd * 15) % 360;
+    params.hue = val;
+    el = document.getElementById('s-hue');
+    el.value = val; setFill(el);
+    document.getElementById('v-hue').textContent = '' + Math.round(val);
+    updatePreviews();
+  }
+  lfoTick();
 
   updatePreviews();
 }
