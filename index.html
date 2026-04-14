@@ -215,12 +215,17 @@ void main() {
   vec2 uv = vUv;
   vec2 texel = 1.0 / uResolution;
 
+  // ── Selective blur: noise-modulated kernel spread ──
+  // Where noise is high → wide blur → soft watercolor bleed
+  // Where noise is low → tight blur → crisp dried edge
+  float blurNoise = fbm(uv * 6.0 + uTime * 0.2 + vec2(42.0, 17.0));
+  float blurSpread = 0.5 + blurNoise * 2.5; // ranges 0.5 to 3.0 texels between samples
+
   // ── Step 1: Gaussian blur of the shape buffer ──
-  // 9x9 kernel with noise-jittered offsets to break grid artifacts
+  // 9x9 kernel with noise-jittered offsets and variable spread
   float petalShape = 0.0;
   float gapShape = 0.0;
   float totalWeight = 0.0;
-  // Per-pixel jitter seed based on position (breaks grid pattern)
   vec2 jitterSeed = uv * 173.7 + vec2(131.1, 97.3);
 
   for (int x = -4; x <= 4; x++) {
@@ -230,7 +235,7 @@ void main() {
         hash(jitterSeed + vec2(float(x) * 7.1, float(y) * 3.3)) - 0.5,
         hash(jitterSeed + vec2(float(x) * 3.7, float(y) * 11.1)) - 0.5
       ) * texel;
-      vec2 offset = vec2(float(x), float(y)) * texel * 1.5 + jitter;
+      vec2 offset = vec2(float(x), float(y)) * texel * blurSpread + jitter;
       float d2 = float(x*x + y*y);
       float w = exp(-d2 / 10.0);
       vec4 s = texture2D(uShapeBuffer, uv + offset);
