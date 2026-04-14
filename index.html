@@ -350,25 +350,34 @@ void main() {
 
   float brightnessShift = (colorLarge - 0.5) * 0.55 + (colorMed - 0.5) * 0.3;
 
-  // Gap color with edge darkening
+  // Gap color with edge darkening + hue shift at edges
   float softGapMask = pow(gapMask, 0.6);
   float gapAlpha = softGapMask * 0.75;
   gapAlpha *= max(0.0, 1.0 - petalMask * 1.5);
   gapAlpha = clamp(gapAlpha, 0.0, 1.0);
-  vec3 gapCol = rotateHue(uGapColor, (colorMed - 0.5) * 0.4);
+  // Hue shifts: edges rotate warm, interior rotates cool, medium noise adds variation
+  float gapHueShift = (1.0 - gapEdgeDarken) * 0.25 + (colorMed - 0.5) * 0.3;
+  vec3 gapCol = rotateHue(uGapColor, gapHueShift);
   gapCol = gapCol * (1.0 - grain) * (1.0 + brightnessShift);
-  vec3 gapDark = gapCol * 0.35;
+  // Edge darkening: deeper, richer version with hue-shifted dark
+  vec3 gapDark = rotateHue(uGapColor, 0.35) * 0.30; // warm-shifted dark
   gapCol = mix(gapDark, gapCol, gapEdgeDarken);
   gapCol = clamp(gapCol, 0.0, 1.0);
   color = mix(color, gapCol, gapAlpha);
 
-  // Petal color with edge darkening
+  // Petal color with edge darkening + hue shift
   float softPetalMask = pow(petalMask, 0.6);
   float petalAlpha = softPetalMask * 0.88;
   petalAlpha = clamp(petalAlpha, 0.0, 1.0);
-  vec3 petalBase = rotateHue(uPetalColor, petalHueAngle + (colorLarge - 0.5) * 0.3);
+  // Per-petal base hue + spatial variation
+  float petalHueShift = petalHueAngle + (colorLarge - 0.5) * 0.3;
+  // At edges: shift warm (+0.2 rad). At interior: shift cool (-0.15 rad).
+  // Medium noise adds per-area variation within the petal.
+  float edgeHueWarp = (1.0 - petalEdgeDarken) * 0.3 - 0.1 + (colorMed - 0.5) * 0.25;
+  vec3 petalBase = rotateHue(uPetalColor, petalHueShift + edgeHueWarp);
   vec3 petalCol = petalBase * (1.0 - grain) * (1.0 + brightnessShift * 0.7);
-  vec3 petalDark = petalCol * 0.30;
+  // Dark edge: warm-shifted, deeply saturated version
+  vec3 petalDark = rotateHue(uPetalColor, petalHueShift + 0.4) * 0.28;
   petalCol = mix(petalDark, petalCol, petalEdgeDarken);
   petalCol = clamp(petalCol, 0.0, 1.0);
   color = mix(color, petalCol, petalAlpha);
