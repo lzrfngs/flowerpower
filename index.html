@@ -137,17 +137,16 @@ input[type=range]::-moz-range-thumb {
 //    with noise → edge darkening → paper texture → final color
 // ─────────────────────────────────────────────────────────
 
-// Vertex shader — passthrough
+// Vertex shader — use p5's built-in matrices for correct positioning
 var vertSrc = `
 attribute vec3 aPosition;
 attribute vec2 aTexCoord;
+uniform mat4 uModelViewMatrix;
+uniform mat4 uProjectionMatrix;
 varying vec2 vUv;
 void main() {
-  // Flip Y for 2D buffer texture (p5 2D is Y-down, WEBGL is Y-up)
-  vUv = vec2(aTexCoord.x, 1.0 - aTexCoord.y);
-  vec4 pos = vec4(aPosition, 1.0);
-  pos.xy = pos.xy * 2.0 - 1.0;
-  gl_Position = pos;
+  vUv = aTexCoord;
+  gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
 }
 `;
 
@@ -350,7 +349,7 @@ function drawShapesToBuffer() {
   var visH = g.height - panelH;
   var cx = g.width / 2;
   var cy = visH / 2;
-  var baseRadius = 0.55 * Math.min(g.width, visH);
+  var baseRadius = 0.40 * Math.min(g.width, visH);
   var innerR = baseRadius * params.centerR;
 
   var N = params.count;
@@ -462,8 +461,9 @@ function renderBurst() {
   watercolorShader.setUniform('uGapColor', gapRgb);
   watercolorShader.setUniform('uPaperColor', [0.918, 0.894, 0.847]); // cream
 
-  // Draw a full-screen quad to trigger the fragment shader
-  quad(-1, -1, 1, -1, 1, 1, -1, 1);
+  // Draw a full-screen plane to trigger the fragment shader
+  noStroke();
+  plane(width, height);
 }
 
 // ── UI ──
