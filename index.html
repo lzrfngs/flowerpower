@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Flower Power</title>
-<script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
 <style>
 * { margin: 0; padding: 0; }
 body { background: #D4CCB8; width: 100vw; height: 100vh; overflow: hidden; }
@@ -12,145 +11,160 @@ canvas { position: fixed; top: 0; left: 0; }
 </style>
 </head>
 <body>
+<canvas id="c"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────
-// Flower Power — Reference Recreation
-// Single-pass GLSL: polar cos(Nθ) split into orange/blue,
-// softness from smoothstep width, multiply for dark overlaps,
-// center glow, plum fringe. No shape buffer, no post-process.
+// Flower Power v6 — Canvas 2D Radial Gradient Blobs
+//
+// Each petal is a separate soft gradient ellipse.
+// Each one is its own independent painted mark.
+// Multiply blending creates dark olive overlaps naturally.
+// No shader, no polar math, no artifacts.
 // ─────────────────────────────────────────────────────────
 
-var vertSrc = `
-attribute vec3 aPosition;
-attribute vec2 aTexCoord;
-uniform mat4 uModelViewMatrix;
-uniform mat4 uProjectionMatrix;
-varying vec2 vUv;
-void main() {
-  vUv = aTexCoord;
-  gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
-}
-`;
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
 
-var fragSrc = `
-precision highp float;
-varying vec2 vUv;
-uniform vec2 uRes;
-
-// Gradient noise — smooth, no grid-aligned edges
-vec2 hashGrad(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract(vec2((p3.x + p3.y) * p3.z, (p3.y + p3.z) * p3.x)) * 2.0 - 1.0;
-}
-float gnoise(vec2 p) {
-  vec2 i = floor(p), f = fract(p);
-  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  float a = dot(hashGrad(i), f);
-  float b = dot(hashGrad(i + vec2(1,0)), f - vec2(1,0));
-  float c = dot(hashGrad(i + vec2(0,1)), f - vec2(0,1));
-  float d = dot(hashGrad(i + vec2(1,1)), f - vec2(1,1));
-  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * 0.5 + 0.5;
+// Seeded pseudo-random for repeatable results
+var seed = 12345;
+function rand() {
+  seed = (seed * 16807 + 0) % 2147483647;
+  return (seed - 1) / 2147483646;
 }
 
-void main() {
-  // Centered, aspect-corrected coordinates
-  vec2 uv = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
-  float r = length(uv);
-  float theta = atan(uv.y, uv.x);
-
-  // ── Parameters ──
-  float N      = 8.0;
-  float blur   = 0.07;
-  float R_min  = 0.18;
-  float R_maxA = 0.37;
-  float R_maxB = 0.33;
-
-  // ── Colors ──
-  vec3 cream   = vec3(0.831, 0.800, 0.722);
-  vec3 orange  = vec3(0.980, 0.482, 0.008);
-  vec3 blue    = vec3(0.616, 0.706, 0.820);
-  vec3 yellow  = vec3(0.93, 0.84, 0.38);
-  vec3 plum    = vec3(0.643, 0.490, 0.588);
-
-  // ── Domain warping — two scales ──
-  // Broad: large shape variation per petal
-  float warpA = gnoise(vec2(theta * 1.5 + 100.0, r * 4.0 + 200.0)) * 0.35
-              + gnoise(vec2(theta * 3.0 + 300.0, r * 2.0 + 400.0)) * 0.15;
-  float warpR = gnoise(vec2(r * 3.0 + 500.0, theta * 2.0 + 600.0)) * 0.04
-              + gnoise(vec2(r * 6.0 + 700.0, theta * 1.0 + 800.0)) * 0.02;
-  // Tight: radial bumps only
-  float wTheta = theta + warpA;
-  float wR = r + warpR;
-
-  // ── Petal shapes on warped coordinates ──
-  float wave = cos(N * wTheta);
-  float petalA = smoothstep(-0.25, 0.45, wave);
-  float petalB = smoothstep(-0.25, 0.45, -wave);
-
-  // Smooth length variation (sin harmonics on warped theta)
-  float lengthVarA = sin(wTheta * 1.0 + 2.3) * 0.03 + sin(wTheta * 3.0 + 5.1) * 0.02;
-  float lengthVarB = sin(wTheta * 1.0 + 4.7) * 0.025 + sin(wTheta * 2.0 + 1.9) * 0.015;
-
-  // Radial boundary using warped radius
-  float boundA = R_min + (R_maxA + lengthVarA - R_min) * petalA;
-  float boundB = R_min + (R_maxB + lengthVarB - R_min) * petalB;
-
-  // Smooth radial masks
-  float maskA = smoothstep(boundA + blur * 1.5, boundA - blur * 1.5, wR);
-  float maskB = smoothstep(boundB + blur * 1.5, boundB - blur * 1.5, wR);
-
-  // ── Outer plum fringe ──
-  float fringe = smoothstep(0.44, 0.32, r) * 0.22;
-
-  // ── Center glow ──
-  float glow   = smoothstep(0.22, 0.0, r);
-
-  // ── Composite (back to front) ──
-  vec3 color = cream;
-
-  // 1. Plum fringe halo (very faint, behind everything)
-  color = mix(color, plum, fringe);
-
-  // 2. Blue flower layer
-  color = mix(color, blue, maskB * 0.80);
-
-  // 3. Orange flower layer
-  color = mix(color, orange, maskA * 0.88);
-
-  // 4. Multiply-darken at overlaps (orange × blue = dark olive)
-  float overlap = maskA * maskB;
-  vec3 bleed = orange * blue;  // ≈ dark olive/amber
-  color = mix(color, bleed, overlap * 0.85);
-
-  // 5. Center glow (warm yellow, on top)
-  color = mix(color, yellow, glow * 0.65);
-
-  gl_FragColor = vec4(color, 1.0);
-}
-`;
-
-var sh;
-
-function setup() {
-  createCanvas(windowWidth, windowHeight, WEBGL);
-  pixelDensity(1);
-  sh = createShader(vertSrc, fragSrc);
-  noLoop();
-  redraw();
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  paint();
 }
 
-function draw() {
-  shader(sh);
-  sh.setUniform('uRes', [width, height]);
-  noStroke();
-  plane(width, height);
+function paint() {
+  var W = canvas.width;
+  var H = canvas.height;
+  var cx = W / 2;
+  var cy = H / 2;
+  var baseR = Math.min(W, H) * 0.28; // base petal reach
+
+  // Reset seed for consistent output
+  seed = 12345;
+
+  // ── Background ──
+  ctx.fillStyle = '#D4CCB8';
+  ctx.fillRect(0, 0, W, H);
+
+  var N = 8; // petals per color
+
+  // ── Generate petal properties ──
+  var petals = [];
+  for (var i = 0; i < N; i++) {
+    var angle = (i / N) * Math.PI * 2;
+    petals.push({
+      angle: angle + (rand() - 0.5) * 0.15,    // slight angle drift
+      length: baseR * (0.80 + rand() * 0.40),   // 80-120% of base
+      width: baseR * (0.30 + rand() * 0.25),     // width perpendicular to axis
+      offset: baseR * (0.05 + rand() * 0.10),    // how far from center the blob starts
+    });
+  }
+
+  var gaps = [];
+  for (var i = 0; i < N; i++) {
+    var angle = (i / N) * Math.PI * 2 + Math.PI / N; // offset half-step
+    gaps.push({
+      angle: angle + (rand() - 0.5) * 0.12,
+      length: baseR * (0.65 + rand() * 0.35),
+      width: baseR * (0.25 + rand() * 0.20),
+      offset: baseR * (0.05 + rand() * 0.08),
+    });
+  }
+
+  // ── Draw function: soft gradient ellipse ──
+  function drawBlob(blob, color, alpha) {
+    var len = blob.length;
+    var wid = blob.width;
+    var ang = blob.angle;
+    // Blob center is offset from flower center along its angle
+    var blobCx = cx + Math.cos(ang) * (blob.offset + len * 0.35);
+    var blobCy = cy + Math.sin(ang) * (blob.offset + len * 0.35);
+
+    ctx.save();
+    ctx.translate(blobCx, blobCy);
+    ctx.rotate(ang);
+    // Scale to create ellipse from circle
+    ctx.scale(1, wid / len);
+
+    var grad = ctx.createRadialGradient(0, 0, 0, 0, 0, len * 0.65);
+    grad.addColorStop(0, color.replace(')', ',' + alpha + ')').replace('rgb', 'rgba'));
+    grad.addColorStop(0.5, color.replace(')', ',' + (alpha * 0.7) + ')').replace('rgb', 'rgba'));
+    grad.addColorStop(1, color.replace(')', ',0)').replace('rgb', 'rgba'));
+
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, len * 0.65, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // ── Layer 1: Plum fringe (very faint, large) ──
+  ctx.globalCompositeOperation = 'source-over';
+  for (var i = 0; i < N; i++) {
+    var ang = (i / N) * Math.PI * 2 + (rand() - 0.5) * 0.3;
+    var fringeBlob = {
+      angle: ang,
+      length: baseR * 1.15,
+      width: baseR * 0.55,
+      offset: baseR * 0.1,
+    };
+    drawBlob(fringeBlob, 'rgb(164,125,150)', 0.12);
+  }
+
+  // ── Layer 2: Blue gap fills (multiply) ──
+  ctx.globalCompositeOperation = 'multiply';
+  // Multiple passes for richness
+  for (var pass = 0; pass < 3; pass++) {
+    for (var i = 0; i < N; i++) {
+      var g = gaps[i];
+      // Slight jitter per pass
+      var jitteredBlob = {
+        angle: g.angle + (rand() - 0.5) * 0.04,
+        length: g.length * (0.92 + rand() * 0.16),
+        width: g.width * (0.90 + rand() * 0.20),
+        offset: g.offset + (rand() - 0.5) * baseR * 0.03,
+      };
+      drawBlob(jitteredBlob, 'rgb(157,180,209)', 0.40);
+    }
+  }
+
+  // ── Layer 3: Orange petals (multiply) ──
+  for (var pass = 0; pass < 3; pass++) {
+    for (var i = 0; i < N; i++) {
+      var p = petals[i];
+      var jitteredBlob = {
+        angle: p.angle + (rand() - 0.5) * 0.04,
+        length: p.length * (0.92 + rand() * 0.16),
+        width: p.width * (0.90 + rand() * 0.20),
+        offset: p.offset + (rand() - 0.5) * baseR * 0.03,
+      };
+      drawBlob(jitteredBlob, 'rgb(250,123,2)', 0.45);
+    }
+  }
+
+  // ── Layer 4: Center glow (normal blend, on top) ──
+  ctx.globalCompositeOperation = 'source-over';
+  var centerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 0.35);
+  centerGrad.addColorStop(0, 'rgba(237,215,96,0.65)');
+  centerGrad.addColorStop(0.5, 'rgba(237,215,96,0.25)');
+  centerGrad.addColorStop(1, 'rgba(237,215,96,0)');
+  ctx.fillStyle = centerGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, baseR * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalCompositeOperation = 'source-over';
 }
 
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
-  redraw();
-}
+window.addEventListener('resize', resize);
+resize();
 </script>
 </body>
 </html>
