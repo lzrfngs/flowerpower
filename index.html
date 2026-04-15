@@ -14,157 +14,186 @@ canvas { position: fixed; top: 0; left: 0; }
 <canvas id="c"></canvas>
 <script>
 // ─────────────────────────────────────────────────────────
-// Flower Power v6 — Canvas 2D Radial Gradient Blobs
+// Flower Power v7 — Mandala: infinite outward bloom
 //
-// Each petal is a separate soft gradient ellipse.
-// Each one is its own independent painted mark.
-// Multiply blending creates dark olive overlaps naturally.
-// No shader, no polar math, no artifacts.
+// Blobs flow outward from center in staggered phases.
+// At phase 0: small, transparent, at center.
+// At phase 0.5: full size, full opacity.
+// At phase 1.0: at outer edge, fading out.
+// Wraps — perpetual outward motion, never grows.
 // ─────────────────────────────────────────────────────────
 
 var canvas = document.getElementById('c');
 var ctx = canvas.getContext('2d');
+var offscreen = document.createElement('canvas');
+var offCtx = offscreen.getContext('2d');
 
-// Seeded pseudo-random for repeatable results
+var W, H, cx, cy, baseR;
+var N = 8;
+var SPEED = 0.06; // phase advance per second — very slow
+
+// Seeded PRNG
 var seed = 12345;
 function rand() {
   seed = (seed * 16807 + 0) % 2147483647;
   return (seed - 1) / 2147483646;
 }
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  paint();
+// Per-blob stable properties (generated once per seed)
+var blobDefs = [];
+
+function generateBlobs() {
+  seed = 12345;
+  blobDefs = [];
+  // Orange petals
+  for (var i = 0; i < N; i++) {
+    blobDefs.push({
+      type: 'petal',
+      baseAngle: (i / N) * Math.PI * 2 + (rand() - 0.5) * 0.15,
+      lengthMult: 0.80 + rand() * 0.40,
+      widthMult: 0.30 + rand() * 0.25,
+      phase: i / N, // staggered evenly
+      r0: 250 - Math.round(rand() * 40), g0: 123 + Math.round((rand()-0.5)*40), b0: 2 + Math.round(rand()*15),
+    });
+  }
+  // Blue gaps
+  for (var i = 0; i < N; i++) {
+    blobDefs.push({
+      type: 'gap',
+      baseAngle: (i / N) * Math.PI * 2 + Math.PI / N + (rand() - 0.5) * 0.12,
+      lengthMult: 0.65 + rand() * 0.35,
+      widthMult: 0.25 + rand() * 0.20,
+      phase: (i + 0.5) / N, // offset from petals
+      r0: 157 + Math.round((rand()-0.5)*30), g0: 180 + Math.round((rand()-0.5)*15), b0: 209 - Math.round(rand()*20),
+    });
+  }
 }
 
-function paint() {
-  var W = canvas.width;
-  var H = canvas.height;
-  var cx = W / 2;
-  var cy = H / 2;
-  var baseR = Math.min(W, H) * 0.28; // base petal reach
+function drawBlob(ang, dist, len, wid, r0, g0, b0, alpha) {
+  var blobCx = cx + Math.cos(ang) * dist;
+  var blobCy = cy + Math.sin(ang) * dist;
 
-  // Reset seed for consistent output
-  seed = 12345;
+  ctx.save();
+  ctx.translate(blobCx, blobCy);
+  ctx.rotate(ang);
+  ctx.scale(1, wid / (len + 0.001));
 
-  // ── Background ──
+  var coreR = Math.min(255, Math.round(r0+20)), coreG = Math.min(255, Math.round(g0+10)), coreB = Math.round(b0);
+  var edgeR = Math.max(0, Math.round(r0-30)), edgeG = Math.max(0, Math.round(g0-15)), edgeB = Math.min(255, Math.round(b0+15));
+  var r0r = Math.round(r0), g0r = Math.round(g0), b0r = Math.round(b0);
+
+  var rad = len * 0.65;
+  var grad = ctx.createRadialGradient(0, 0, 0, 0, 0, rad);
+  grad.addColorStop(0,   'rgba('+coreR+','+coreG+','+coreB+','+alpha.toFixed(3)+')');
+  grad.addColorStop(0.4, 'rgba('+r0r+','+g0r+','+b0r+','+(alpha*0.8).toFixed(3)+')');
+  grad.addColorStop(0.7, 'rgba('+edgeR+','+edgeG+','+edgeB+','+(alpha*0.4).toFixed(3)+')');
+  grad.addColorStop(1,   'rgba('+edgeR+','+edgeG+','+edgeB+',0)');
+
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(0, 0, rad, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function paint(time) {
   ctx.fillStyle = '#D4CCB8';
   ctx.fillRect(0, 0, W, H);
 
-  var N = 8; // petals per color
+  var t = time * SPEED; // global phase
 
-  // ── Generate petal properties ──
-  var petals = [];
-  for (var i = 0; i < N; i++) {
-    var angle = (i / N) * Math.PI * 2;
-    petals.push({
-      angle: angle + (rand() - 0.5) * 0.15,    // slight angle drift
-      length: baseR * (0.80 + rand() * 0.40),   // 80-120% of base
-      width: baseR * (0.30 + rand() * 0.25),     // width perpendicular to axis
-      offset: baseR * (0.05 + rand() * 0.10),    // how far from center the blob starts
-    });
-  }
+  // Sort blobs by phase so inner (newer) draw on top of outer (older)
+  var sorted = blobDefs.slice().sort(function(a, b) {
+    var pa = (a.phase + t) % 1;
+    var pb = (b.phase + t) % 1;
+    return pa - pb;
+  });
 
-  var gaps = [];
-  for (var i = 0; i < N; i++) {
-    var angle = (i / N) * Math.PI * 2 + Math.PI / N; // offset half-step
-    gaps.push({
-      angle: angle + (rand() - 0.5) * 0.12,
-      length: baseR * (0.65 + rand() * 0.35),
-      width: baseR * (0.25 + rand() * 0.20),
-      offset: baseR * (0.05 + rand() * 0.08),
-    });
-  }
-
-  // ── Draw function: soft gradient ellipse ──
-  function drawBlob(blob, color, alpha) {
-    var len = blob.length;
-    var wid = blob.width;
-    var ang = blob.angle;
-    // Blob center is offset from flower center along its angle
-    var blobCx = cx + Math.cos(ang) * (blob.offset + len * 0.35);
-    var blobCy = cy + Math.sin(ang) * (blob.offset + len * 0.35);
-
-    ctx.save();
-    ctx.translate(blobCx, blobCy);
-    ctx.rotate(ang);
-    // Scale to create ellipse from circle
-    ctx.scale(1, wid / len);
-
-    var grad = ctx.createRadialGradient(0, 0, 0, 0, 0, len * 0.65);
-    grad.addColorStop(0, color.replace(')', ',' + alpha + ')').replace('rgb', 'rgba'));
-    grad.addColorStop(0.5, color.replace(')', ',' + (alpha * 0.7) + ')').replace('rgb', 'rgba'));
-    grad.addColorStop(1, color.replace(')', ',0)').replace('rgb', 'rgba'));
-
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(0, 0, len * 0.65, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  // ── Layer 1: Plum fringe (very faint, large) ──
+  // Draw blobs
   ctx.globalCompositeOperation = 'source-over';
-  for (var i = 0; i < N; i++) {
-    var ang = (i / N) * Math.PI * 2 + (rand() - 0.5) * 0.3;
-    var fringeBlob = {
-      angle: ang,
-      length: baseR * 1.15,
-      width: baseR * 0.55,
-      offset: baseR * 0.1,
-    };
-    drawBlob(fringeBlob, 'rgb(164,125,150)', 0.12);
+
+  for (var i = 0; i < sorted.length; i++) {
+    var def = sorted[i];
+    var phase = (def.phase + t) % 1; // 0 = center, 1 = outer edge
+
+    // Smooth envelope: fade in from center, full in middle, fade out at edge
+    var envelope = Math.sin(phase * Math.PI); // 0 at 0 and 1, peaks at 0.5
+    if (envelope < 0.01) continue; // skip invisible blobs
+
+    // Scale and position from phase
+    var len = baseR * def.lengthMult * (0.3 + phase * 0.7); // grows as it moves out
+    var wid = baseR * def.widthMult * (0.4 + phase * 0.6);
+    var dist = baseR * phase * 0.5; // distance from center
+    var alpha = envelope * (def.type === 'petal' ? 0.65 : 0.55);
+
+    // Use multiply for overlaps when phase is mid-range
+    ctx.globalCompositeOperation = phase > 0.3 && phase < 0.7 ? 'multiply' : 'source-over';
+
+    drawBlob(def.baseAngle, dist, len, wid, def.r0, def.g0, def.b0, alpha);
   }
 
-  // ── Layer 2: Blue gap fills (multiply) ──
-  ctx.globalCompositeOperation = 'multiply';
-  // Multiple passes for richness
-  for (var pass = 0; pass < 3; pass++) {
-    for (var i = 0; i < N; i++) {
-      var g = gaps[i];
-      // Slight jitter per pass
-      var jitteredBlob = {
-        angle: g.angle + (rand() - 0.5) * 0.04,
-        length: g.length * (0.92 + rand() * 0.16),
-        width: g.width * (0.90 + rand() * 0.20),
-        offset: g.offset + (rand() - 0.5) * baseR * 0.03,
-      };
-      drawBlob(jitteredBlob, 'rgb(157,180,209)', 0.40);
-    }
-  }
-
-  // ── Layer 3: Orange petals (multiply) ──
-  for (var pass = 0; pass < 3; pass++) {
-    for (var i = 0; i < N; i++) {
-      var p = petals[i];
-      var jitteredBlob = {
-        angle: p.angle + (rand() - 0.5) * 0.04,
-        length: p.length * (0.92 + rand() * 0.16),
-        width: p.width * (0.90 + rand() * 0.20),
-        offset: p.offset + (rand() - 0.5) * baseR * 0.03,
-      };
-      drawBlob(jitteredBlob, 'rgb(250,123,2)', 0.45);
-    }
-  }
-
-  // ── Layer 4: Center glow (normal blend, on top) ──
+  // Center glow — always on top
   ctx.globalCompositeOperation = 'source-over';
-  var centerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 0.35);
-  centerGrad.addColorStop(0, 'rgba(237,215,96,0.65)');
-  centerGrad.addColorStop(0.5, 'rgba(237,215,96,0.25)');
-  centerGrad.addColorStop(1, 'rgba(237,215,96,0)');
-  ctx.fillStyle = centerGrad;
+  var glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 0.30);
+  glow.addColorStop(0,   'rgba(237,215,96,0.60)');
+  glow.addColorStop(0.5, 'rgba(237,215,96,0.20)');
+  glow.addColorStop(1,   'rgba(237,215,96,0)');
+  ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(cx, cy, baseR * 0.35, 0, Math.PI * 2);
+  ctx.arc(cx, cy, baseR * 0.30, 0, Math.PI * 2);
   ctx.fill();
-
   ctx.globalCompositeOperation = 'source-over';
+
+  // ── Post-process: Light blur + levels ──
+  offscreen.width = W;
+  offscreen.height = H;
+  offCtx.filter = 'blur(1px)';
+  offCtx.drawImage(canvas, 0, 0);
+  offCtx.filter = 'none';
+
+  var imgData = offCtx.getImageData(0, 0, W, H);
+  var d = imgData.data;
+  var bgR = 212, bgG = 204, bgB = 184;
+  var lowIn = 0.30, highIn = 0.80, gamma = 1.2;
+  for (var idx = 0; idx < d.length; idx += 4) {
+    var dr = Math.abs(d[idx]-bgR) + Math.abs(d[idx+1]-bgG) + Math.abs(d[idx+2]-bgB);
+    if (dr < 15) continue;
+    var edgeDarken = dr < 60 ? 0.75 + (dr/60)*0.25 : 1.0;
+    for (var c = 0; c < 3; c++) {
+      var v = d[idx+c] / 255;
+      v = (v - lowIn) / (highIn - lowIn);
+      v = Math.max(0, Math.min(1, v));
+      v = Math.pow(v, 1.0 / gamma);
+      d[idx+c] = Math.round(v * 255 * edgeDarken);
+    }
+  }
+  offCtx.putImageData(imgData, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(offscreen, 0, 0);
 }
 
-window.addEventListener('resize', resize);
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  cx = W / 2;
+  cy = H / 2;
+  baseR = Math.min(W, H) * 0.28;
+}
+
+var startTime = null;
+function tick(ts) {
+  requestAnimationFrame(tick);
+  if (!startTime) startTime = ts;
+  var elapsed = (ts - startTime) / 1000;
+  paint(elapsed);
+}
+
+generateBlobs();
+window.addEventListener('resize', function() { resize(); });
 resize();
+requestAnimationFrame(tick);
 </script>
 </body>
 </html>
