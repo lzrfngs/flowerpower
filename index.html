@@ -61,7 +61,7 @@ void main() {
 
   // ── Parameters ──
   float N      = 8.0;
-  float blur   = 0.06;
+  float blur   = 0.07;
   float R_min  = 0.18;
   float R_maxA = 0.37;
   float R_maxB = 0.33;
@@ -73,18 +73,15 @@ void main() {
   vec3 yellow  = vec3(0.93, 0.84, 0.38);
   vec3 plum    = vec3(0.643, 0.490, 0.588);
 
-  // ── Domain warping — the organic shape maker ──
-  // Distort theta and r with low-frequency noise BEFORE computing petal shapes.
-  // The cosine wave sees warped coordinates, so each petal comes out a
-  // different size/shape — wider here, narrower there, bumpy edges.
-  // All continuous functions — zero seams possible.
+  // ── Domain warping — two scales ──
+  // Broad: large shape variation per petal
   float warpA = gnoise(vec2(theta * 1.5 + 100.0, r * 4.0 + 200.0)) * 0.35
               + gnoise(vec2(theta * 3.0 + 300.0, r * 2.0 + 400.0)) * 0.15;
   float warpR = gnoise(vec2(r * 3.0 + 500.0, theta * 2.0 + 600.0)) * 0.04
               + gnoise(vec2(r * 6.0 + 700.0, theta * 1.0 + 800.0)) * 0.02;
-
-  float wTheta = theta + warpA;  // warped angle
-  float wR = r + warpR;          // warped radius
+  // Tight: radial bumps only
+  float wTheta = theta + warpA;
+  float wR = r + warpR;
 
   // ── Petal shapes on warped coordinates ──
   float wave = cos(N * wTheta);
@@ -100,8 +97,8 @@ void main() {
   float boundB = R_min + (R_maxB + lengthVarB - R_min) * petalB;
 
   // Smooth radial masks
-  float maskA = smoothstep(boundA + blur, boundA - blur, wR);
-  float maskB = smoothstep(boundB + blur, boundB - blur, wR);
+  float maskA = smoothstep(boundA + blur * 1.5, boundA - blur * 1.5, wR);
+  float maskB = smoothstep(boundB + blur * 1.5, boundB - blur * 1.5, wR);
 
   // ── Outer plum fringe ──
   float fringe = smoothstep(0.44, 0.32, r) * 0.22;
