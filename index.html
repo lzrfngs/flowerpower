@@ -57,51 +57,26 @@ void main() {
   vec3 yellow  = vec3(0.93, 0.84, 0.38);
   vec3 plum    = vec3(0.643, 0.490, 0.588);
 
-  // ── Per-petal hash ──
-  // Find nearest petal center, then hash from that index.
-  // This avoids the floor() boundary cutting through petals.
+  // ── Per-petal radial variation (no angular indexing = no seams) ──
   float sliceAngle = 6.28318 / N;
+  // Use cos-based petal shape — inherently smooth, no floor() discontinuities
+  float wave = cos(N * theta);
+  // Fat rounded blobs via smoothstep (not pow which stays narrow)
+  float petalA = smoothstep(-0.25, 0.45, wave);   // orange: wide, flat-topped
+  float petalB = smoothstep(-0.25, 0.45, -wave);  // blue: complementary
 
-  // Nearest petal center index
-  float rawPetalIdx = (theta + sliceAngle * 0.5) / sliceAngle;
-  float petalIdx = floor(rawPetalIdx + 0.5); // round to nearest, not floor
-  float petalCenterAngle = petalIdx * sliceAngle;
-  // Nearest gap center index
-  float rawGapIdx = theta / sliceAngle;
-  float gapIdx = floor(rawGapIdx + 0.5);
+  // Per-petal length variation via sin harmonics on the angle
+  // These are smooth functions of theta — no discontinuities
+  float lengthVarA = sin(theta * 1.0 + 2.3) * 0.03 + sin(theta * 3.0 + 5.1) * 0.02;
+  float lengthVarB = sin(theta * 1.0 + 4.7) * 0.025 + sin(theta * 2.0 + 1.9) * 0.015;
 
-  // Hash functions
-  float h1 = sin(petalIdx * 3.7 + 1.3) * 0.5 + 0.5;
-  float g1 = sin(gapIdx * 4.3 + 3.1) * 0.5 + 0.5;
+  // Radial boundary modulated by petal shape + smooth length variation
+  float boundA = R_min + (R_maxA + lengthVarA - R_min) * petalA;
+  float boundB = R_min + (R_maxB + lengthVarB - R_min) * petalB;
 
-  // Per-petal variation (only radial — angular variation causes seam artifacts)
-  float lengthVar = (h1 - 0.5) * 0.12;
-  float gapLenVar = (g1 - 0.5) * 0.08;
-
-  // ── Petal shapes ──
-  // Angle relative to this petal's center
-  float localA = theta - petalCenterAngle;
-  localA = mod(localA + 3.14159, 6.28318) - 3.14159;
-  float localA_gap = theta - gapIdx * sliceAngle;
-  localA_gap = mod(localA_gap + 3.14159, 6.28318) - 3.14159;
-
-  // Width grows with radius (fat tips) — NO per-petal angular variation
-  // (per-petal variation on angular width causes visible seams)
-  float petalWidth = sliceAngle * (0.15 + r * 0.8);
-  float gapWidth = sliceAngle * (0.12 + r * 0.6);
-
-  // Angular masks — smooth, no index-dependent discontinuities
-  float petalA = smoothstep(petalWidth + blur * 0.5, petalWidth - blur * 2.0, abs(localA));
-  float petalB = smoothstep(gapWidth + blur * 0.5, gapWidth - blur * 2.0, abs(localA_gap));
-
-  // Radial masks with per-petal length variation
-  float thisR_maxA = R_maxA + lengthVar;
-  float thisR_maxB = R_maxB + gapLenVar;
-  float rMaskA = smoothstep(thisR_maxA + blur, thisR_maxA - blur, r) * smoothstep(R_min - blur * 2.0, R_min + blur, r);
-  float rMaskB = smoothstep(thisR_maxB + blur, thisR_maxB - blur, r) * smoothstep(R_min - blur * 2.0, R_min + blur, r);
-
-  float maskA = petalA * rMaskA;
-  float maskB = petalB * rMaskB;
+  // Smooth radial masks
+  float maskA = smoothstep(boundA + blur, boundA - blur, r);
+  float maskB = smoothstep(boundB + blur, boundB - blur, r);
 
   // ── Outer plum fringe ──
   float fringe = smoothstep(0.44, 0.32, r) * 0.22;
