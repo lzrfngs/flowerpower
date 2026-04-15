@@ -5,23 +5,714 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Flower Power</title>
 <style>
-* { margin: 0; padding: 0; }
-body { background: #D4CCB8; width: 100vw; height: 100vh; overflow: hidden; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #D4CCB8; width: 100vw; height: 100vh; overflow: hidden; font-family: 'IBM Plex Mono', monospace; }
 canvas { position: fixed; top: 0; left: 0; }
+#fx-panel {
+  position: fixed; top: 12px; right: 12px; z-index: 10;
+  background: rgba(12,12,12,0.85); border-radius: 6px; padding: 8px 0;
+  backdrop-filter: blur(8px); user-select: none;
+  max-height: calc(100vh - 24px); overflow-y: auto;
+  width: 160px;
+}
+#fx-panel .fx-item {
+  display: flex; align-items: center; gap: 6px;
+  color: #555; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
+  cursor: grab; padding: 4px 10px; transition: background 0.1s, color 0.1s;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+#fx-panel .fx-item:last-child { border-bottom: none; }
+#fx-panel .fx-item:hover { background: rgba(255,255,255,0.05); }
+#fx-panel .fx-item.active { color: #fff; }
+#fx-panel .fx-item.dragging { opacity: 0.3; }
+#fx-panel .fx-item.drag-over { border-top: 2px solid rgba(255,255,255,0.5); }
+#fx-panel .fx-item .fx-handle {
+  color: #333; font-size: 9px; flex-shrink: 0; cursor: grab; line-height: 1;
+}
+#fx-panel .fx-item.active .fx-handle { color: #666; }
+#fx-panel .fx-item input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; width: 10px; height: 10px;
+  border: 1px solid #444; border-radius: 2px; background: transparent;
+  cursor: pointer; flex-shrink: 0; transition: all 0.15s;
+}
+#fx-panel .fx-item input[type="checkbox"]:checked {
+  background: #fff; border-color: #fff;
+}
+#fx-panel .fx-item .fx-name { flex: 1; pointer-events: none; }
+#fx-panel .fx-item .fx-num {
+  color: #333; font-size: 8px; font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+#fx-panel .fx-item.active .fx-num { color: #555; }
+
+#msg-overlay {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  z-index: 5; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0;
+}
+#msg-overlay .msg-line {
+  color: rgba(0,0,0,0.85); text-align: center; line-height: 1.05;
+  font-size: clamp(36px, 6vw, 80px); white-space: nowrap;
+}
+#msg-overlay .msg-line .ch {
+  display: inline-block;
+}
+#msg-overlay .msg-line .ch.serif {
+  font-family: 'Elsie', serif; font-weight: 900; font-style: normal;
+}
+#msg-overlay .msg-line .ch.serif-i {
+  font-family: 'Elsie', serif; font-weight: 400; font-style: italic;
+}
+#msg-overlay .msg-line .ch.pixel {
+  font-family: 'Pixelify Sans', sans-serif; font-weight: 700;
+}
+#msg-overlay .msg-line .ch.space { width: 0.3em; }
+#msg-overlay .msg-blank-wrap {
+  display: inline-block; position: relative; pointer-events: auto;
+  border-bottom: 2px solid rgba(0,0,0,0.25); margin: 0 2px;
+}
+#msg-overlay .msg-blank-wrap:focus-within { border-bottom-color: rgba(0,0,0,0.6); }
+#msg-overlay .msg-blank {
+  font-family: 'Pixelify Sans', sans-serif; font-weight: 700;
+  background: none; border: none;
+  color: rgba(0,0,0,0.85); text-align: center;
+  font-size: inherit; line-height: inherit; padding: 0 4px;
+  outline: none; min-width: 100px; width: auto;
+}
+#msg-overlay .msg-blank::placeholder { color: rgba(0,0,0,0.2); }
+#export-btn {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  padding: 8px 24px; z-index: 6;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 1px;
+  background: rgba(0,0,0,0.8); color: #fff; border: none;
+  border-radius: 4px; cursor: pointer; pointer-events: auto;
+  transition: opacity 0.2s;
+}
+#export-btn:hover { opacity: 0.8; }
+#export-btn:disabled { opacity: 0.5; cursor: default; }
 </style>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=Elsie:wght@400;900&family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js"></script>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="msg-overlay">
+  <div class="msg-line msg-line-top" id="msg-top"></div>
+  <div class="msg-line msg-line-bot" id="msg-bot"></div>
+</div>
+<div id="fx-panel"></div>
 <script>
 // ─────────────────────────────────────────────────────────
-// Flower Power v7 — Mandala: infinite outward bloom
-//
-// Blobs flow outward from center in staggered phases.
-// At phase 0: small, transparent, at center.
-// At phase 0.5: full size, full opacity.
-// At phase 1.0: at outer edge, fading out.
-// Wraps — perpetual outward motion, never grows.
+// Flower Power v9 — Particle bloom + reorderable FX stack
 // ─────────────────────────────────────────────────────────
+
+// ── FX pipeline: each effect is a function(d, W, H, time) ──
+// d = Uint8ClampedArray pixel data, mutated in place
+var bgR = 212, bgG = 204, bgB = 184;
+
+var fxFunctions = {
+  grain: function(d, W, H, time) {
+    for (var idx = 0; idx < d.length; idx += 4) {
+      var n = (Math.random() - 0.5) * 40;
+      d[idx] += n; d[idx+1] += n; d[idx+2] += n;
+    }
+  },
+  erode: function(d, W, H, time) {
+    var src = new Uint8ClampedArray(d);
+    for (var y = 1; y < H-1; y++) {
+      for (var x = 1; x < W-1; x++) {
+        var i = (y*W+x)*4;
+        var dr = Math.abs(src[i]-bgR)+Math.abs(src[i+1]-bgG)+Math.abs(src[i+2]-bgB);
+        if (dr < 50) {
+          var ni = (y*W+x+1)*4; var ni2 = (y*W+x-1)*4;
+          d[ni]   = Math.round(d[ni]*0.7 + bgR*0.3);
+          d[ni+1] = Math.round(d[ni+1]*0.7 + bgG*0.3);
+          d[ni+2] = Math.round(d[ni+2]*0.7 + bgB*0.3);
+          d[ni2]   = Math.round(d[ni2]*0.7 + bgR*0.3);
+          d[ni2+1] = Math.round(d[ni2+1]*0.7 + bgG*0.3);
+          d[ni2+2] = Math.round(d[ni2+2]*0.7 + bgB*0.3);
+        }
+      }
+    }
+  },
+  bloom: function(d, W, H, time) {
+    var bCanvas = document.createElement('canvas');
+    bCanvas.width = W; bCanvas.height = H;
+    var bCtx = bCanvas.getContext('2d');
+    var tmp = new ImageData(new Uint8ClampedArray(d), W, H);
+    bCtx.putImageData(tmp, 0, 0);
+    var bData = bCtx.getImageData(0, 0, W, H);
+    var bd = bData.data;
+    for (var idx = 0; idx < bd.length; idx += 4) {
+      var lum = bd[idx]*0.3 + bd[idx+1]*0.59 + bd[idx+2]*0.11;
+      var t = Math.max(0, (lum - 160) / 95);
+      bd[idx] *= t; bd[idx+1] *= t; bd[idx+2] *= t; bd[idx+3] = 255;
+    }
+    bCtx.putImageData(bData, 0, 0);
+    var bCanvas2 = document.createElement('canvas');
+    bCanvas2.width = W; bCanvas2.height = H;
+    var bCtx2 = bCanvas2.getContext('2d');
+    bCtx2.filter = 'blur(12px)';
+    bCtx2.drawImage(bCanvas, 0, 0);
+    bCtx2.filter = 'none';
+    var bloom = bCtx2.getImageData(0, 0, W, H).data;
+    for (var idx = 0; idx < d.length; idx += 4) {
+      d[idx] = Math.min(255, d[idx] + bloom[idx] * 0.5);
+      d[idx+1] = Math.min(255, d[idx+1] + bloom[idx+1] * 0.5);
+      d[idx+2] = Math.min(255, d[idx+2] + bloom[idx+2] * 0.5);
+    }
+  },
+  shift: function(d, W, H, time) {
+    var src = new Uint8ClampedArray(d);
+    var off = 3;
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var i = (y*W+x)*4;
+        var xr = Math.min(W-1, x+off); var xb = Math.max(0, x-off);
+        d[i]   = src[(y*W+xr)*4];
+        d[i+2] = src[(y*W+xb)*4+2];
+      }
+    }
+  },
+  invert: function(d, W, H, time) {
+    for (var idx = 0; idx < d.length; idx += 4) {
+      d[idx] = 255-d[idx]; d[idx+1] = 255-d[idx+1]; d[idx+2] = 255-d[idx+2];
+    }
+  },
+  crush: function(d, W, H, time) {
+    for (var idx = 0; idx < d.length; idx += 4) {
+      for (var ch=0;ch<3;ch++) {
+        d[idx+ch] = d[idx+ch] < 60 ? 0 : (d[idx+ch] > 200 ? 255 : d[idx+ch]);
+      }
+    }
+  },
+  fold: function(d, W, H, time) {
+    for (var idx = 0; idx < d.length; idx += 4) {
+      for (var ch=0;ch<3;ch++) {
+        var v = d[idx+ch] * 2;
+        v = v % 510;
+        d[idx+ch] = v > 255 ? 510 - v : v;
+      }
+    }
+  },
+  scatter: function(d, W, H, time) {
+    var src = new Uint8ClampedArray(d);
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var ox = x + Math.round((Math.random()-0.5)*6);
+        var oy = y + Math.round((Math.random()-0.5)*6);
+        ox = Math.max(0, Math.min(W-1, ox));
+        oy = Math.max(0, Math.min(H-1, oy));
+        var si = (oy*W+ox)*4; var di = (y*W+x)*4;
+        d[di]=src[si]; d[di+1]=src[si+1]; d[di+2]=src[si+2];
+      }
+    }
+  },
+  feedback: function(d, W, H, time) {
+    if (feedbackCanvas.width === W && feedbackCanvas.height === H) {
+      var fb = feedbackCtx.getImageData(0, 0, W, H).data;
+      for (var idx = 0; idx < d.length; idx += 4) {
+        d[idx]   = Math.round(d[idx]*0.6 + fb[idx]*0.4);
+        d[idx+1] = Math.round(d[idx+1]*0.6 + fb[idx+1]*0.4);
+        d[idx+2] = Math.round(d[idx+2]*0.6 + fb[idx+2]*0.4);
+      }
+    }
+  },
+  quantize: function(d, W, H, time) {
+    var levels = 6;
+    for (var idx = 0; idx < d.length; idx += 4) {
+      for (var ch=0;ch<3;ch++) {
+        d[idx+ch] = Math.round(Math.round(d[idx+ch]/255*levels)/levels*255);
+      }
+    }
+  },
+  separate: function(d, W, H, time) {
+    var src = new Uint8ClampedArray(d);
+    var sep = 5;
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var i = (y*W+x)*4;
+        var yr = Math.max(0,Math.min(H-1, y-sep));
+        var yb = Math.min(H-1,Math.max(0, y+sep));
+        d[i]   = src[(yr*W+x)*4];
+        d[i+2] = src[(yb*W+x)*4+2];
+      }
+    }
+  },
+  wobble: function(d, W, H, time) {
+    var src = new Uint8ClampedArray(d);
+    for (var y = 0; y < H; y++) {
+      var xOff = Math.round(Math.sin(y * 0.03 + time * 2) * 8);
+      for (var x = 0; x < W; x++) {
+        var sx = Math.max(0, Math.min(W-1, x + xOff));
+        var si = (y*W+sx)*4; var di = (y*W+x)*4;
+        d[di]=src[si]; d[di+1]=src[si+1]; d[di+2]=src[si+2];
+      }
+    }
+  },
+  ash: function(d, W, H, time) {
+    for (var idx = 0; idx < d.length; idx += 4) {
+      var lum = Math.round(d[idx]*0.3 + d[idx+1]*0.59 + d[idx+2]*0.11);
+      d[idx]   = Math.round((d[idx]*0.3 + lum*0.7) * 0.85);
+      d[idx+1] = Math.round((d[idx+1]*0.3 + lum*0.7) * 0.85);
+      d[idx+2] = Math.round((d[idx+2]*0.3 + lum*0.7) * 0.85);
+    }
+  },
+  solarize: function(d, W, H, time) {
+    for (var idx = 0; idx < d.length; idx += 4) {
+      for (var ch=0;ch<3;ch++) {
+        var v = d[idx+ch] / 255;
+        d[idx+ch] = Math.round(Math.abs(Math.sin(v * Math.PI * 1.5)) * 255);
+      }
+    }
+  },
+  emboss: function(d, W, H, time) {
+    var src = new Uint8ClampedArray(d);
+    for (var y = 1; y < H-1; y++) {
+      for (var x = 1; x < W-1; x++) {
+        var i = (y*W+x)*4;
+        var i2 = ((y-1)*W+(x-1))*4;
+        for (var ch=0;ch<3;ch++) {
+          d[i+ch] = Math.max(0, Math.min(255, 128 + (src[i+ch] - src[i2+ch]) * 2));
+        }
+      }
+    }
+  },
+  melt: function(d, W, H, time) {
+    for (var x = 0; x < W; x++) {
+      for (var y = H-2; y >= 0; y--) {
+        var i = (y*W+x)*4;
+        var lum = d[i]*0.3 + d[i+1]*0.59 + d[i+2]*0.11;
+        if (lum < 120) {
+          var below = ((y+1)*W+x)*4;
+          d[below]   = Math.round(d[below]*0.5 + d[i]*0.5);
+          d[below+1] = Math.round(d[below+1]*0.5 + d[i+1]*0.5);
+          d[below+2] = Math.round(d[below+2]*0.5 + d[i+2]*0.5);
+        }
+      }
+    }
+  },
+  fracture: function(d, W, H, time) {
+    var src = new Uint8ClampedArray(d);
+    var bs = 16;
+    for (var by = 0; by < H; by += bs) {
+      for (var bx = 0; bx < W; bx += bs) {
+        if (Math.random() > 0.3) continue;
+        var ox = Math.round((Math.random()-0.5)*12);
+        var oy = Math.round((Math.random()-0.5)*12);
+        for (var y = by; y < Math.min(by+bs,H); y++) {
+          for (var x = bx; x < Math.min(bx+bs,W); x++) {
+            var sx = Math.max(0,Math.min(W-1,x+ox));
+            var sy = Math.max(0,Math.min(H-1,y+oy));
+            var di = (y*W+x)*4; var si = (sy*W+sx)*4;
+            d[di]=src[si]; d[di+1]=src[si+1]; d[di+2]=src[si+2];
+          }
+        }
+      }
+    }
+  },
+  clamp: function(d, W, H, time) {
+    for (var idx = 0; idx < d.length; idx += 4) {
+      for (var ch=0;ch<3;ch++) {
+        d[idx+ch] = Math.round(d[idx+ch] / 64) * 64;
+      }
+    }
+  },
+  blur: function(d, W, H, time) {
+    // Box blur — average 3x3 neighborhood
+    var src = new Uint8ClampedArray(d);
+    for (var y = 1; y < H-1; y++) {
+      for (var x = 1; x < W-1; x++) {
+        for (var ch = 0; ch < 3; ch++) {
+          var sum = 0;
+          for (var dy = -1; dy <= 1; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+              sum += src[((y+dy)*W+(x+dx))*4+ch];
+            }
+          }
+          d[(y*W+x)*4+ch] = Math.round(sum / 9);
+        }
+      }
+    }
+  },
+  decay: function(d, W, H, time) {
+    if (decayCanvas.width === W && decayCanvas.height === H) {
+      var dc = decayCtx.getImageData(0, 0, W, H).data;
+      for (var idx = 0; idx < d.length; idx += 4) {
+        var n = (Math.random() - 0.5) * 20;
+        d[idx]   = Math.round(d[idx]*0.85 + (dc[idx]+n)*0.15);
+        d[idx+1] = Math.round(d[idx+1]*0.85 + (dc[idx+1]+n)*0.15);
+        d[idx+2] = Math.round(d[idx+2]*0.85 + (dc[idx+2]+n)*0.15);
+      }
+    }
+  }
+};
+
+// ── Pipeline order + enabled state ──
+var fxPipeline = [
+  'grain','erode','bloom','shift','invert','crush','fold','scatter',
+  'feedback','quantize','separate','wobble','ash','solarize',
+  'emboss','melt','fracture','clamp','blur','decay'
+];
+var fxEnabled = {};
+fxPipeline.forEach(function(name) { fxEnabled[name] = false; });
+
+// ── Build draggable stack UI ──
+var panel = document.getElementById('fx-panel');
+var dragSrcEl = null;
+
+function updateNumbers() {
+  var items = panel.querySelectorAll('.fx-item');
+  for (var i = 0; i < items.length; i++) {
+    items[i].querySelector('.fx-num').textContent = String(i + 1).padStart(2, '0');
+  }
+}
+
+function rebuildPipelineFromDOM() {
+  var items = panel.querySelectorAll('.fx-item');
+  fxPipeline = [];
+  for (var i = 0; i < items.length; i++) {
+    fxPipeline.push(items[i].dataset.fx);
+  }
+  updateNumbers();
+}
+
+function createFxItem(name) {
+  var item = document.createElement('div');
+  item.className = 'fx-item';
+  item.draggable = true;
+  item.dataset.fx = name;
+
+  var handle = document.createElement('span');
+  handle.className = 'fx-handle';
+  handle.textContent = '⠿';
+
+  var cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.addEventListener('change', function() {
+    fxEnabled[name] = cb.checked;
+    item.className = 'fx-item' + (cb.checked ? ' active' : '');
+  });
+
+  var label = document.createElement('span');
+  label.className = 'fx-name';
+  label.textContent = name;
+
+  var num = document.createElement('span');
+  num.className = 'fx-num';
+  num.textContent = '00';
+
+  item.appendChild(handle);
+  item.appendChild(cb);
+  item.appendChild(label);
+  item.appendChild(num);
+
+  // ── Drag events ──
+  item.addEventListener('dragstart', function(e) {
+    dragSrcEl = item;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', name);
+  });
+  item.addEventListener('dragend', function() {
+    item.classList.remove('dragging');
+    var all = panel.querySelectorAll('.fx-item');
+    for (var i = 0; i < all.length; i++) all[i].classList.remove('drag-over');
+  });
+  item.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragSrcEl !== item) {
+      item.classList.add('drag-over');
+    }
+  });
+  item.addEventListener('dragleave', function() {
+    item.classList.remove('drag-over');
+  });
+  item.addEventListener('drop', function(e) {
+    e.preventDefault();
+    item.classList.remove('drag-over');
+    if (dragSrcEl && dragSrcEl !== item) {
+      // Determine position: insert before or after
+      var items = Array.from(panel.querySelectorAll('.fx-item'));
+      var srcIdx = items.indexOf(dragSrcEl);
+      var dstIdx = items.indexOf(item);
+      if (srcIdx < dstIdx) {
+        panel.insertBefore(dragSrcEl, item.nextSibling);
+      } else {
+        panel.insertBefore(dragSrcEl, item);
+      }
+      rebuildPipelineFromDOM();
+    }
+  });
+
+  return item;
+}
+
+fxPipeline.forEach(function(name) {
+  panel.appendChild(createFxItem(name));
+});
+updateNumbers();
+
+// ── Per-character font mixing (like Default Lingo reference) ──
+var fontClasses = ['serif', 'serif-i', 'pixel'];
+var fontCanvasMap = {
+  'serif':   '"Elsie", serif',
+  'serif-i': 'italic "Elsie", serif',
+  'pixel':   '"Pixelify Sans", sans-serif'
+};
+
+// Store character data for canvas rendering during export
+var msgChars = { top: [], bot: [] };
+
+function mixedText(container, text, blankPlaceholder, storageKey) {
+  container.innerHTML = '';
+  var charData = [];
+  var parts = text.split('__BLANK__');
+  for (var p = 0; p < parts.length; p++) {
+    if (p > 0) {
+      // Insert editable blank
+      var wrap = document.createElement('span');
+      wrap.className = 'msg-blank-wrap';
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = 'msg-blank';
+      inp.placeholder = blankPlaceholder[p - 1] || '';
+      inp.spellcheck = false;
+      var sizer = document.createElement('span');
+      sizer.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit;padding:0 4px;';
+      wrap.appendChild(sizer);
+      function autoSize(input, sizer, placeholder) {
+        return function() {
+          sizer.textContent = input.value || placeholder;
+          input.style.width = Math.max(40, sizer.offsetWidth + 8) + 'px';
+        };
+      }
+      var resizeFn = autoSize(inp, sizer, blankPlaceholder[p - 1] || '');
+      inp.addEventListener('input', function() {
+        resizeFn();
+        wrap.style.borderBottomColor = inp.value.length > 0 ? 'transparent' : 'rgba(0,0,0,0.25)';
+        checkExportReady();
+      });
+      wrap.appendChild(inp);
+      container.appendChild(wrap);
+      (function(fn) { requestAnimationFrame(fn); })(resizeFn);
+      // Store blank marker
+      charData.push({ type: 'blank', inputEl: inp });
+    }
+    var chars = parts[p];
+    var fontIdx = Math.floor(Math.random() * 3);
+    for (var i = 0; i < chars.length; i++) {
+      var ch = chars[i];
+      var span = document.createElement('span');
+      span.className = 'ch';
+      if (ch === ' ') {
+        span.classList.add('space');
+        span.innerHTML = '&nbsp;';
+        charData.push({ type: 'space' });
+      } else {
+        var cls = fontClasses[fontIdx % 3];
+        span.classList.add(cls);
+        span.textContent = ch;
+        charData.push({ type: 'char', ch: ch, font: cls });
+        fontIdx += 1 + Math.floor(Math.random() * 2);
+      }
+      container.appendChild(span);
+    }
+  }
+  msgChars[storageKey] = charData;
+}
+
+mixedText(document.getElementById('msg-top'), 'Have a __BLANK__ and', ['groovy'], 'top');
+mixedText(document.getElementById('msg-bot'), '__BLANK__ earth day', ['far out'], 'bot');
+
+// ── Render message text onto a canvas context ──
+function renderMessage(tCtx, tW, tH) {
+  var fontSize = Math.round(tW * 0.065);
+  tCtx.textBaseline = 'middle';
+  tCtx.fillStyle = 'rgba(0,0,0,0.85)';
+
+  var lines = ['top', 'bot'];
+  var gap = fontSize * 1.15;
+  var lineY = [tH / 2 - gap * 0.4, tH / 2 + gap * 0.6];
+
+  for (var li = 0; li < 2; li++) {
+    var data = msgChars[lines[li]];
+    // First pass: measure total width
+    var totalW = 0;
+    var segments = [];
+    for (var i = 0; i < data.length; i++) {
+      var d = data[i];
+      if (d.type === 'space') {
+        segments.push({ w: fontSize * 0.35, type: 'space' });
+        totalW += fontSize * 0.35;
+      } else if (d.type === 'blank') {
+        var val = d.inputEl.value || d.inputEl.placeholder;
+        var font = '700 ' + fontSize + 'px "Pixelify Sans", sans-serif';
+        tCtx.font = font;
+        var w = tCtx.measureText(val).width;
+        segments.push({ w: w, type: 'blank', text: val, font: font });
+        totalW += w;
+      } else {
+        var font = (d.font === 'serif-i' ? 'italic 900' : '900') + ' ' + fontSize + 'px ' + fontCanvasMap[d.font];
+        tCtx.font = font;
+        var w = tCtx.measureText(d.ch).width;
+        segments.push({ w: w, type: 'char', ch: d.ch, font: font });
+        totalW += w;
+      }
+    }
+    // Second pass: draw centered
+    var x = (tW - totalW) / 2;
+    for (var i = 0; i < segments.length; i++) {
+      var s = segments[i];
+      if (s.type === 'space') {
+        x += s.w;
+      } else if (s.type === 'blank' || s.type === 'char') {
+        tCtx.font = s.font;
+        tCtx.fillText(s.type === 'blank' ? s.text : s.ch, x, lineY[li]);
+        x += s.w;
+      }
+    }
+  }
+}
+
+// ── Download button ──
+var exportBtn = document.createElement('button');
+exportBtn.id = 'export-btn';
+exportBtn.textContent = 'download';
+exportBtn.style.display = 'none';
+document.body.appendChild(exportBtn);
+
+function checkExportReady() {
+  var inputs = document.querySelectorAll('.msg-blank');
+  var allFilled = true;
+  for (var i = 0; i < inputs.length; i++) {
+    if (!inputs[i].value.trim()) { allFilled = false; break; }
+  }
+  exportBtn.style.display = allFilled ? 'block' : 'none';
+}
+
+exportBtn.addEventListener('click', function() { startExport(); });
+
+async function startExport() {
+  exportBtn.textContent = 'encoding…';
+  exportBtn.disabled = true;
+  isExporting = true;
+
+  var EW = 1080, EH = 1440, FPS = 30, DURATION = 10;
+  var totalFrames = FPS * DURATION;
+  var frameDuration = Math.round(1000000 / FPS); // microseconds per frame
+  var expCanvas = document.createElement('canvas');
+  expCanvas.width = EW; expCanvas.height = EH;
+  var expCtx = expCanvas.getContext('2d');
+
+  // Save originals
+  var origCanvas = canvas, origCtx = ctx, origOff = offscreen, origOffCtx = offCtx;
+  var origW = W, origH = H, origCx = cx, origCy = cy, origBaseR = baseR;
+  var origFeedback = feedbackCanvas, origFeedbackCtx = feedbackCtx;
+  var origDecay = decayCanvas, origDecayCtx = decayCtx;
+  var origParticles = particles, origNextSpawn = nextSpawnTime;
+  var origGeneration = generation, origSeed = spawnSeed;
+
+  // Create export-specific buffers
+  var expOff = document.createElement('canvas');
+  expOff.width = EW; expOff.height = EH;
+  var expOffCtx = expOff.getContext('2d');
+  var expFb = document.createElement('canvas');
+  expFb.width = EW; expFb.height = EH;
+  var expFbCtx = expFb.getContext('2d');
+  var expDc = document.createElement('canvas');
+  expDc.width = EW; expDc.height = EH;
+  var expDcCtx = expDc.getContext('2d');
+
+  // Redirect globals
+  canvas = expCanvas; ctx = expCtx;
+  offscreen = expOff; offCtx = expOffCtx;
+  feedbackCanvas = expFb; feedbackCtx = expFbCtx;
+  decayCanvas = expDc; decayCtx = expDcCtx;
+  W = EW; H = EH; cx = EW/2; cy = EH/2; baseR = Math.min(EW,EH) * 0.35;
+
+  // Reset particle system for clean export
+  particles = [];
+  nextSpawnTime = 0;
+  generation = 0;
+  spawnSeed = 1;
+
+  // ── WebCodecs + mp4-muxer: exact frame timestamps ──
+  var muxer = new Mp4Muxer.Muxer({
+    target: new Mp4Muxer.ArrayBufferTarget(),
+    video: { codec: 'avc', width: EW, height: EH },
+    fastStart: 'in-memory'
+  });
+
+  var encoder = new VideoEncoder({
+    output: function(chunk, meta) { muxer.addVideoChunk(chunk, meta); },
+    error: function(e) { console.error('VideoEncoder error:', e); }
+  });
+
+  encoder.configure({
+    codec: 'avc1.640028',
+    width: EW,
+    height: EH,
+    bitrate: 5000000,
+    framerate: FPS
+  });
+
+  try {
+    for (var frame = 0; frame < totalFrames; frame++) {
+      var t = frame / FPS;
+      paint(t);
+      renderMessage(expCtx, EW, EH);
+
+      var videoFrame = new VideoFrame(expCanvas, {
+        timestamp: frame * frameDuration,
+        duration: frameDuration
+      });
+      encoder.encode(videoFrame, { keyFrame: frame % 60 === 0 });
+      videoFrame.close();
+
+      // Wait for encoder to drain if queue is backing up
+      while (encoder.encodeQueueSize > 5) {
+        await new Promise(function(r) { setTimeout(r, 10); });
+      }
+
+      // Yield to UI every frame for progress + prevent tab freeze
+      exportBtn.textContent = 'encoding ' + Math.round(((frame + 1) / totalFrames) * 100) + '%';
+      await new Promise(function(r) { setTimeout(r, 0); });
+    }
+
+    await encoder.flush();
+    muxer.finalize();
+
+    var blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'flower-power.mov'; a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error('Export failed:', e);
+    alert('Export failed: ' + e.message);
+  }
+
+  // Restore everything
+  canvas = origCanvas; ctx = origCtx;
+  offscreen = origOff; offCtx = origOffCtx;
+  feedbackCanvas = origFeedback; feedbackCtx = origFeedbackCtx;
+  decayCanvas = origDecay; decayCtx = origDecayCtx;
+  W = origW; H = origH; cx = origCx; cy = origCy; baseR = origBaseR;
+  particles = origParticles; nextSpawnTime = origNextSpawn;
+  generation = origGeneration; spawnSeed = origSeed;
+  isExporting = false;
+  exportBtn.textContent = 'download';
+  exportBtn.disabled = false;
+}
+
+// Feedback buffer for temporal effects
+var feedbackCanvas = document.createElement('canvas');
+var feedbackCtx = feedbackCanvas.getContext('2d');
+var decayCanvas = document.createElement('canvas');
+var decayCtx = decayCanvas.getContext('2d');
 
 var canvas = document.getElementById('c');
 var ctx = canvas.getContext('2d');
@@ -30,43 +721,83 @@ var offCtx = offscreen.getContext('2d');
 
 var W, H, cx, cy, baseR;
 var N = 8;
-var SPEED = 0.06; // phase advance per second — very slow
 
-// Seeded PRNG
-var seed = 12345;
-function rand() {
-  seed = (seed * 16807 + 0) % 2147483647;
-  return (seed - 1) / 2147483646;
+// ── Particle system config ──
+var LIFESPAN = 5.0;        // seconds: center → tip → gone
+var SPAWN_INTERVAL = 0.55; // seconds between ring spawns
+
+// Seeded PRNG for per-particle variation
+var spawnSeed = 1;
+function spawnRand() {
+  spawnSeed = (spawnSeed * 16807 + 0) % 2147483647;
+  return (spawnSeed - 1) / 2147483646;
 }
 
-// Per-blob stable properties (generated once per seed)
-var blobDefs = [];
+var particles = [];
+var nextSpawnTime = 0;
+var generation = 0;
 
-function generateBlobs() {
-  seed = 12345;
-  blobDefs = [];
-  // Orange petals
+// HSL→RGB helper for hue-shifted palettes
+function hsl2rgb(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s /= 100; l /= 100;
+  var c = (1 - Math.abs(2 * l - 1)) * s;
+  var x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  var m = l - c / 2;
+  var r, g, b;
+  if (h < 60)       { r=c; g=x; b=0; }
+  else if (h < 120) { r=x; g=c; b=0; }
+  else if (h < 180) { r=0; g=c; b=x; }
+  else if (h < 240) { r=0; g=x; b=c; }
+  else if (h < 300) { r=x; g=0; b=c; }
+  else              { r=c; g=0; b=x; }
+  return [Math.round((r+m)*255), Math.round((g+m)*255), Math.round((b+m)*255)];
+}
+
+function spawnRing(time) {
+  // Cool/jewel-tone palette — NO warm colors at all
+  // Primary petals cycle: teal(170°) → blue(220°) → purple(280°) → green(140°)
+  // Wide sweep across the cool half of the wheel
+  var petalHue = 210 + Math.sin(generation * 0.7) * 70 + Math.sin(generation * 1.3) * 30; // ~110°–310°
+  var petalSat = 50 + Math.sin(generation * 1.1) * 15;  // 35–65
+  var petalLit = 50 + Math.sin(generation * 0.9) * 10;  // 40–60
+
+  // Secondary layer: complement shift — when petals are blue, gaps are green, etc.
+  var gapHue = petalHue + 90 + Math.sin(generation * 1.5) * 30; // offset by ~60°–120°
+  var gapSat = 35 + Math.sin(generation * 1.3) * 10;
+  var gapLit = 62 + Math.sin(generation * 0.6) * 8;
+
+  // Primary petals
   for (var i = 0; i < N; i++) {
-    blobDefs.push({
+    var h = petalHue + (spawnRand() - 0.5) * 25;
+    var s = petalSat + (spawnRand() - 0.5) * 12;
+    var l = petalLit + (spawnRand() - 0.5) * 10;
+    var rgb = hsl2rgb(h, s, l);
+    particles.push({
       type: 'petal',
-      baseAngle: (i / N) * Math.PI * 2 + (rand() - 0.5) * 0.15,
-      lengthMult: 0.80 + rand() * 0.40,
-      widthMult: 0.30 + rand() * 0.25,
-      phase: i / N, // staggered evenly
-      r0: 250 - Math.round(rand() * 40), g0: 123 + Math.round((rand()-0.5)*40), b0: 2 + Math.round(rand()*15),
+      birthTime: time,
+      baseAngle: (i / N) * Math.PI * 2 + (spawnRand() - 0.5) * 0.20,
+      lengthMult: 0.80 + spawnRand() * 0.40,
+      widthMult: 0.30 + spawnRand() * 0.25,
+      r0: rgb[0], g0: rgb[1], b0: rgb[2],
     });
   }
-  // Blue gaps
+  // Secondary gaps
   for (var i = 0; i < N; i++) {
-    blobDefs.push({
+    var h = gapHue + (spawnRand() - 0.5) * 20;
+    var s = gapSat + (spawnRand() - 0.5) * 8;
+    var l = gapLit + (spawnRand() - 0.5) * 6;
+    var rgb = hsl2rgb(h, s, l);
+    particles.push({
       type: 'gap',
-      baseAngle: (i / N) * Math.PI * 2 + Math.PI / N + (rand() - 0.5) * 0.12,
-      lengthMult: 0.65 + rand() * 0.35,
-      widthMult: 0.25 + rand() * 0.20,
-      phase: (i + 0.5) / N, // offset from petals
-      r0: 157 + Math.round((rand()-0.5)*30), g0: 180 + Math.round((rand()-0.5)*15), b0: 209 - Math.round(rand()*20),
+      birthTime: time,
+      baseAngle: (i / N) * Math.PI * 2 + Math.PI / N + (spawnRand() - 0.5) * 0.15,
+      lengthMult: 0.65 + spawnRand() * 0.35,
+      widthMult: 0.25 + spawnRand() * 0.20,
+      r0: rgb[0], g0: rgb[1], b0: rgb[2],
     });
   }
+  generation++;
 }
 
 function drawBlob(ang, dist, len, wid, r0, g0, b0, alpha) {
@@ -97,42 +828,75 @@ function drawBlob(ang, dist, len, wid, r0, g0, b0, alpha) {
 }
 
 function paint(time) {
+  // ── Spawn & cull ──
+  while (time >= nextSpawnTime) {
+    spawnRing(nextSpawnTime);
+    nextSpawnTime += SPAWN_INTERVAL;
+  }
+  // Remove dead particles (age > 1.0)
+  var alive = [];
+  for (var i = 0; i < particles.length; i++) {
+    if ((time - particles[i].birthTime) / LIFESPAN < 1.0) alive.push(particles[i]);
+  }
+  particles = alive;
+
+  // ── Clear ──
   ctx.fillStyle = '#D4CCB8';
   ctx.fillRect(0, 0, W, H);
 
-  var t = time * SPEED; // global phase
-
-  // Sort blobs by phase so inner (newer) draw on top of outer (older)
-  var sorted = blobDefs.slice().sort(function(a, b) {
-    var pa = (a.phase + t) % 1;
-    var pb = (b.phase + t) % 1;
-    return pa - pb;
-  });
-
-  // Draw blobs
+  // ── Draw gaps (behind) ──
   ctx.globalCompositeOperation = 'source-over';
+  for (var i = 0; i < particles.length; i++) {
+    var p = particles[i];
+    if (p.type !== 'gap') continue;
+    var age = (time - p.birthTime) / LIFESPAN;
+    var eased = age * age * (3 - 2 * age);
 
-  for (var i = 0; i < sorted.length; i++) {
-    var def = sorted[i];
-    var phase = (def.phase + t) % 1; // 0 = center, 1 = outer edge
+    // Smooth envelope: fade in first 10%, hold, fade out last 25%
+    var fadeIn = age < 0.10 ? age / 0.10 : 1.0;
+    var fadeOut = age > 0.75 ? (1.0 - age) / 0.25 : 1.0;
+    var envelope = fadeIn * fadeIn * fadeOut * fadeOut;
 
-    // Smooth envelope: fade in from center, full in middle, fade out at edge
-    var envelope = Math.sin(phase * Math.PI); // 0 at 0 and 1, peaks at 0.5
-    if (envelope < 0.01) continue; // skip invisible blobs
+    var len = baseR * p.lengthMult * (0.5 + eased * 0.5);
+    var wid = baseR * p.widthMult * (0.6 + eased * 0.4);
+    var dist = baseR * eased * 0.45;
+    var alpha = envelope * 0.45;
 
-    // Scale and position from phase
-    var len = baseR * def.lengthMult * (0.3 + phase * 0.7); // grows as it moves out
-    var wid = baseR * def.widthMult * (0.4 + phase * 0.6);
-    var dist = baseR * phase * 0.5; // distance from center
-    var alpha = envelope * (def.type === 'petal' ? 0.65 : 0.55);
-
-    // Use multiply for overlaps when phase is mid-range
-    ctx.globalCompositeOperation = phase > 0.3 && phase < 0.7 ? 'multiply' : 'source-over';
-
-    drawBlob(def.baseAngle, dist, len, wid, def.r0, def.g0, def.b0, alpha);
+    drawBlob(p.baseAngle, dist, len, wid, p.r0, p.g0, p.b0, alpha);
   }
 
-  // Center glow — always on top
+  // ── Draw petals (on top) ──
+  for (var i = 0; i < particles.length; i++) {
+    var p = particles[i];
+    if (p.type !== 'petal') continue;
+    var age = (time - p.birthTime) / LIFESPAN;
+    var eased = age * age * (3 - 2 * age);
+
+    var fadeIn = age < 0.10 ? age / 0.10 : 1.0;
+    var fadeOut = age > 0.75 ? (1.0 - age) / 0.25 : 1.0;
+    var envelope = fadeIn * fadeIn * fadeOut * fadeOut;
+
+    var len = baseR * p.lengthMult * (0.5 + eased * 0.5);
+    var wid = baseR * p.widthMult * (0.6 + eased * 0.4);
+    var dist = baseR * eased * 0.45;
+    var alpha = envelope * 0.55;
+
+    drawBlob(p.baseAngle, dist, len, wid, p.r0, p.g0, p.b0, alpha);
+  }
+
+  // ── Multiply overlap layer for mid-life petals ──
+  ctx.globalCompositeOperation = 'multiply';
+  for (var i = 0; i < particles.length; i++) {
+    var p = particles[i];
+    if (p.type !== 'petal') continue;
+    var age = (time - p.birthTime) / LIFESPAN;
+    if (age < 0.15 || age > 0.60) continue;
+    var len = baseR * p.lengthMult * 0.45;
+    var wid = baseR * p.widthMult * 0.7;
+    drawBlob(p.baseAngle, len * 0.2, len, wid, p.r0, p.g0, p.b0, 0.05);
+  }
+
+  // ── Center glow ──
   ctx.globalCompositeOperation = 'source-over';
   var glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 0.30);
   glow.addColorStop(0,   'rgba(237,215,96,0.60)');
@@ -144,30 +908,47 @@ function paint(time) {
   ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
 
-  // ── Post-process: Light blur + levels ──
+  // ── Post-process: base blur + levels ──
   offscreen.width = W;
   offscreen.height = H;
-  offCtx.filter = 'blur(1px)';
+  offCtx.filter = 'blur(0.5px)';
   offCtx.drawImage(canvas, 0, 0);
   offCtx.filter = 'none';
 
   var imgData = offCtx.getImageData(0, 0, W, H);
   var d = imgData.data;
-  var bgR = 212, bgG = 204, bgB = 184;
+
+  // ── Base levels (always on) ──
   var lowIn = 0.30, highIn = 0.80, gamma = 1.2;
   for (var idx = 0; idx < d.length; idx += 4) {
     var dr = Math.abs(d[idx]-bgR) + Math.abs(d[idx+1]-bgG) + Math.abs(d[idx+2]-bgB);
     if (dr < 15) continue;
     var edgeDarken = dr < 60 ? 0.75 + (dr/60)*0.25 : 1.0;
-    for (var c = 0; c < 3; c++) {
-      var v = d[idx+c] / 255;
+    for (var ch = 0; ch < 3; ch++) {
+      var v = d[idx+ch] / 255;
       v = (v - lowIn) / (highIn - lowIn);
       v = Math.max(0, Math.min(1, v));
       v = Math.pow(v, 1.0 / gamma);
-      d[idx+c] = Math.round(v * 255 * edgeDarken);
+      d[idx+ch] = Math.round(v * 255 * edgeDarken);
     }
   }
+
+  // ── Run FX pipeline in stack order ──
+  for (var fi = 0; fi < fxPipeline.length; fi++) {
+    var fname = fxPipeline[fi];
+    if (fxEnabled[fname] && fxFunctions[fname]) {
+      fxFunctions[fname](d, W, H, time);
+    }
+  }
+
   offCtx.putImageData(imgData, 0, 0);
+
+  // Store frame for temporal effects
+  feedbackCanvas.width = W; feedbackCanvas.height = H;
+  feedbackCtx.drawImage(offscreen, 0, 0);
+  decayCanvas.width = W; decayCanvas.height = H;
+  decayCtx.drawImage(offscreen, 0, 0);
+
   ctx.clearRect(0, 0, W, H);
   ctx.drawImage(offscreen, 0, 0);
 }
@@ -179,18 +960,23 @@ function resize() {
   canvas.height = H;
   cx = W / 2;
   cy = H / 2;
-  baseR = Math.min(W, H) * 0.28;
+  baseR = Math.min(W, H) * 0.35;
 }
 
 var startTime = null;
+var FRAME_INTERVAL = 1000 / 12; // 12fps
+var lastFrameTime = 0;
+var isExporting = false;
 function tick(ts) {
   requestAnimationFrame(tick);
+  if (isExporting) return;
   if (!startTime) startTime = ts;
+  if (ts - lastFrameTime < FRAME_INTERVAL) return;
+  lastFrameTime = ts;
   var elapsed = (ts - startTime) / 1000;
   paint(elapsed);
 }
 
-generateBlobs();
 window.addEventListener('resize', function() { resize(); });
 resize();
 requestAnimationFrame(tick);
