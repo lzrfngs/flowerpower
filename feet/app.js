@@ -277,9 +277,9 @@ hoseMat.onBeforeCompile = (sh) => {
         vec3 d = vRest - h.xyz;
         float dist = length(d);
         if (dist > h.w * 1.6 + max(uRunLen[i].x, uRunLen[i].y)) continue;
-        float r = h.w * (0.62 + 0.55 * nA + 0.16 * nB);
+        float r = h.w * (0.7 + 0.42 * nA + 0.1 * nB);
         if (dist < r) discard;
-        hEdge = max(hEdge, 1.0 - smoothstep(r, r * 1.22 + 0.0015, dist));
+        hEdge = max(hEdge, 1.0 - smoothstep(r, r * 1.07 + 0.0009, dist));
         vec3 rd = uRunDir[i];
         float t = dot(d, rd);
         vec3 pp = d - rd * t; pp -= uHoleN[i] * dot(pp, uHoleN[i]);
@@ -298,13 +298,13 @@ hoseMat.onBeforeCompile = (sh) => {
       vec3 q = vRest * 9000.0;
       float kf = 1.0 - smoothstep(0.35, 1.3, fwidth(q.y) + fwidth(q.x) * 0.5);
       a *= 1.0 + 0.16 * kf * sin(q.x + q.z) * sin(q.y);
-      a *= 0.94 + 0.12 * nA;
+      a *= 0.985 + 0.03 * nA;
       // ladders: only the cross threads remain
       float lt = ladT * 520.0;
       float thread = smoothstep(0.55, 0.75, abs(fract(lt) - 0.5) * 2.0);
       float lf = 1.0 - smoothstep(0.3, 1.0, fwidth(lt));
       a = mix(a, a * mix(0.3, 0.12 + 0.75 * thread, lf), ladder);
-      a = mix(a, min(1.0, a * 1.7 + 0.3), hEdge);
+      a = mix(a, min(1.0, a * 1.5 + 0.2), hEdge);
       a *= mix(1.0, 1.15, uDamp);
       diffuseColor.a = clamp(a, 0.0, 1.0) * vMask.y;
     `)
@@ -330,7 +330,7 @@ const LEG0 = Object.fromEntries(P_KEYS.map(k => [k, 0]));
 const mkPose = (p) => {
   const L = { ...LEG0, ...(p.L || {}) };
   const R = { ...LEG0, ...(p.R || p.L || {}) };
-  return { root: p.root || [0, 0, 0], L, R, cam: p.cam || [0.42, 0.26, 0.8], look: p.look || 0.5 };
+  return { root: p.root || [0, 0, 0], L, R, cam: (p.cam || [0.42, 0.26, 0.8]).map(x => x * 1.5), look: p.look || 0.5 };
 };
 // angles in degrees. hipX<0 = leg forward, knee>0 = bend, ankX>0 = point, curl>0 = toes curl down
 const CLOSE = { hipZ: -7.3, ankZ: 7.3 };
@@ -633,7 +633,7 @@ $('toeLen').oninput = (e) => { state.toeLen = +e.target.value; dirty = true; };
 $('arch').oninput = (e) => { state.arch = +e.target.value; applyShape(); dirty = true; };
 $('mend').onclick = () => { holes.length = 0; syncHoles(); };
 $('panelBtn').onclick = () => $('panel').classList.toggle('closed');
-setDamp(0.15); setDenier(0.35);
+setDamp(0.15); setDenier(0.4);
 
 // ───────────────────────── loop ─────────────────────────
 let dirty = true;
@@ -712,4 +712,5 @@ requestAnimationFrame(frame);
 
 // debug / automation hook
 window.__feet = { skinMat, hoseMat, scene, THREE, skin,  setPose, POSES, state, holes, rip, syncHoles, hose, U, camera, controls, rest0, restN, skinIdx, bones, mask,
-  jump() { tPose = 1; cur = to.slice(); camGoal = null; solve(time); skinVerts(); updateFeetCenter(); } };
+  jump() { tPose = 1; cur = to.slice(); camGoal = null; solve(time); skinVerts(); updateFeetCenter();
+    controls.target.copy(feetCenter); camera.position.copy(feetCenter).add(new THREE.Vector3(...POSES[state.pose].cam)); } };
