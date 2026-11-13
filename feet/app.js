@@ -56,6 +56,7 @@ computeNormals(rest0, restN);
 const isToe = bones.map(b => b.name.startsWith('toe'));
 const isFoot = bones.map(b => b.name.startsWith('toe') || b.name.startsWith('foot'));
 const mask = new Float32Array(NV * 3);
+const toeAttr = new Float32Array(NV);
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 for (let v = 0; v < NV; v++) {
   let toe = 0, foot = 0;
@@ -71,6 +72,7 @@ for (let v = 0; v < NV; v++) {
   mask[v * 3] = Math.min(1, sole * 0.75 + heel * 0.6 + tip * 0.8 + toe * 0.25);
   mask[v * 3 + 1] = smooth(data.ycut - 0.005, data.ycut - 0.16, y);
   mask[v * 3 + 2] = foot;
+  toeAttr[v] = toe;
 }
 
 const geo = new THREE.BufferGeometry();
@@ -78,6 +80,7 @@ geo.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(TH
 geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3).setUsage(THREE.DynamicDrawUsage));
 geo.setAttribute('aRest', new THREE.BufferAttribute(rest0, 3));
 geo.setAttribute('aMask', new THREE.BufferAttribute(mask, 3));
+geo.setAttribute('aToe', new THREE.BufferAttribute(toeAttr, 1));
 geo.setIndex(new THREE.BufferAttribute(index, 1));
 geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.5, 0), 3);
 
@@ -86,7 +89,7 @@ const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -104,24 +107,23 @@ controls.minDistance = 0.18;
 controls.maxDistance = 3.2;
 controls.target.set(0, 0.1, 0.08);
 
-const key = new THREE.SpotLight(0xfff0e2, 9, 0, 0.5, 0.7, 1.6);
-key.position.set(0.9, 1.7, 1.4);
+const key = new THREE.SpotLight(0xfff3e6, 7.5, 0, 0.55, 0.9, 1.4);
+key.position.set(0.9, 1.9, 1.3);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
-key.shadow.bias = -0.0004;
-key.shadow.normalBias = 0.004;
-key.shadow.radius = 5;
+key.shadow.bias = -0.0003;
+key.shadow.normalBias = 0.005;
+key.shadow.radius = 9;
+key.shadow.blurSamples = 16;
 key.shadow.camera.near = 0.5; key.shadow.camera.far = 5;
 scene.add(key, key.target);
-const rim = new THREE.DirectionalLight(0x9db8ff, 2.2);
-rim.position.set(-1.2, 0.9, -1.4);
+const rim = new THREE.DirectionalLight(0xdfe8ff, 1.5);   // back kicker
+rim.position.set(-1.1, 1.0, -1.5);
 scene.add(rim);
-const rim2 = new THREE.DirectionalLight(0xff9fc0, 1.1);
-rim2.position.set(1.4, 0.4, -1.0);
-scene.add(rim2);
-const fill = new THREE.DirectionalLight(0xbfc6ff, 0.35);
-fill.position.set(-1, 0.6, 1.2);
+const fill = new THREE.DirectionalLight(0xe6e9f5, 0.55); // broad soft fill
+fill.position.set(-1.3, 0.7, 1.0);
 scene.add(fill);
+scene.add(new THREE.HemisphereLight(0x9aa0ad, 0x241a16, 0.55));
 
 // floor: soft pool of light that fades into the background
 {
@@ -133,7 +135,7 @@ scene.add(fill);
   const tex = new THREE.CanvasTexture(cv);
   const floor = new THREE.Mesh(
     new THREE.CircleGeometry(1.9, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0b0b10, roughness: 0.55, metalness: 0.0, alphaMap: tex, transparent: true, envMapIntensity: 0.15 }));
+    new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 0.6, metalness: 0.0, alphaMap: tex, transparent: true, envMapIntensity: 0.15 }));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
@@ -152,6 +154,7 @@ const bgSRGB = new THREE.Color(BG).convertLinearToSRGB();
 const U = {
   uBg: { value: bgSRGB },
   uDamp: { value: 0.15 },
+  uLift: { value: 0 },
   uBlush: { value: 0.6 },
   uNailC: { value: [] }, uNailA: { value: [] }, uNailS: { value: [] }, uNailU: { value: [] },
   uNailColor: { value: new THREE.Color(0xf3b9b4) },
@@ -175,11 +178,12 @@ for (const t of data.toes) {
 }
 
 const VERT_HEAD = /* glsl */`
-attribute vec3 aRest; attribute vec3 aMask;
-varying vec3 vRest; varying vec3 vMask;
+attribute vec3 aRest; attribute vec3 aMask; attribute float aToe;
+uniform float uLift;
+varying vec3 vRest; varying vec3 vMask; varying float vToe; varying float vWY;
 `;
 const FRAG_HEAD = /* glsl */`
-varying vec3 vRest; varying vec3 vMask;
+varying vec3 vRest; varying vec3 vMask; varying float vToe; varying float vWY;
 uniform vec3 uBg; uniform float uDamp;
 ` + NOISE;
 
@@ -191,7 +195,7 @@ skinMat.onBeforeCompile = (sh) => {
   Object.assign(sh.uniforms, U);
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\n' + VERT_HEAD)
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = aRest; vMask = aMask;');
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = aRest; vMask = aMask; vToe = aToe; vWY = position.y + uLift;');
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>', '#include <common>\n' + FRAG_HEAD + /* glsl */`
       uniform float uBlush; uniform vec3 uNailColor; uniform float uNailMix;
@@ -213,29 +217,19 @@ skinMat.onBeforeCompile = (sh) => {
       skinC *= 0.96 + 0.07 * mott;
       vec3 rosy = skinC * vec3(1.06, 0.70, 0.68) + vec3(0.07, 0.0, 0.005);
       skinC = mix(skinC, rosy, clamp(vMask.x * uBlush * (0.75 + 0.5 * mott), 0.0, 1.0));
-      skinC *= mix(1.0, 0.9, uDamp);
+      skinC *= mix(1.0, 0.93, uDamp);
+      skinC *= mix(0.5, 1.0, smoothstep(0.0, 0.028, vWY));
       vec3 nailC = mix(skinC * vec3(1.08, 0.9, 0.9) + 0.06, uNailColor, uNailMix);
       nailC = mix(nailC, mix(nailC, vec3(0.97, 0.94, 0.92), 0.75), nailTip * (1.0 - uNailMix));
       diffuseColor.rgb = mix(skinC, nailC, nailM);
     `)
     .replace('#include <roughnessmap_fragment>', /* glsl */`#include <roughnessmap_fragment>
-      vec3 dp = vRest * 420.0;
-      float dn = vnoise(dp);
-      float drop = smoothstep(0.70, 0.78, dn) * smoothstep(0.3, 0.95, uDamp) * (1.0 - nailM);
-      roughnessFactor *= mix(1.0, 0.55 + 0.7 * vnoise(vRest * 70.0), uDamp * 0.6);
-      roughnessFactor = mix(roughnessFactor, 0.05, drop);
+      roughnessFactor *= mix(1.0, 0.8 + 0.4 * vnoise(vRest * 34.0), uDamp * 0.5);
       roughnessFactor = mix(roughnessFactor, 0.1, nailM);
-    `)
-    .replace('#include <normal_fragment_maps>', /* glsl */`#include <normal_fragment_maps>
-      if (drop > 0.001) {
-        float e = 0.35;
-        vec3 g = vec3(vnoise(dp + vec3(e,0,0)) - dn, vnoise(dp + vec3(0,e,0)) - dn, vnoise(dp + vec3(0,0,e)) - dn) / e;
-        normal = normalize(normal - (viewMatrix * vec4(g, 0.0)).xyz * 0.9 * drop);
-      }
     `)
     .replace('#include <emissivemap_fragment>', /* glsl */`#include <emissivemap_fragment>
       float ndv = clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0);
-      totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.42, 0.34) * pow(1.0 - ndv, 3.0) * 0.16 * (1.0 - nailM);
+      totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.42, 0.34) * pow(1.0 - ndv, 3.0) * 0.07 * (1.0 - nailM);
     `)
     .replace('#include <dithering_fragment>', /* glsl */`#include <dithering_fragment>
       gl_FragColor.rgb = mix(uBg, gl_FragColor.rgb, vMask.y);
@@ -243,7 +237,7 @@ skinMat.onBeforeCompile = (sh) => {
 };
 
 const hoseMat = new THREE.MeshPhysicalMaterial({
-  color: 0x0c0c10, roughness: 0.62, metalness: 0, sheen: 0.22, sheenRoughness: 0.45, sheenColor: 0x9090a8,
+  color: 0x0c0c10, roughness: 0.5, metalness: 0, sheen: 0.2, sheenRoughness: 0.3, sheenColor: 0x9090a8,
   transparent: true, side: THREE.DoubleSide, envMapIntensity: 0.45, depthWrite: true,
   polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
 });
@@ -255,7 +249,7 @@ hoseMat.onBeforeCompile = (sh) => {
       varying float vStretch;
     `)
     .replace('#include <begin_vertex>', /* glsl */`#include <begin_vertex>
-      vRest = aRest; vMask = aMask;
+      vRest = aRest; vMask = aMask; vToe = aToe; vWY = position.y + uLift;
       float gd = length(aRest - uGrab) / uGrabR;
       float gw = exp(-gd * gd * 0.9) * 0.45 + exp(-gd * 1.6) * 0.55;
       float pl = length(uPull);
@@ -297,7 +291,10 @@ hoseMat.onBeforeCompile = (sh) => {
       // knit
       vec3 q = vRest * 9000.0;
       float kf = 1.0 - smoothstep(0.35, 1.3, fwidth(q.y) + fwidth(q.x) * 0.5);
-      a *= 1.0 + 0.16 * kf * sin(q.x + q.z) * sin(q.y);
+      a *= 1.0 + 0.2 * kf * sin(q.x + q.z) * sin(q.y);
+      // faint course lines and yarn irregularity
+      a *= 1.0 + 0.05 * sin(vRest.y * 2600.0 + nA * 6.0) * (1.0 - smoothstep(0.2, 0.9, fwidth(vRest.y * 2600.0)));
+      a *= 0.97 + 0.06 * vnoise(vRest * vec3(900.0, 60.0, 900.0));
       a *= 0.985 + 0.03 * nA;
       // ladders: only the cross threads remain
       float lt = ladT * 520.0;
@@ -305,6 +302,15 @@ hoseMat.onBeforeCompile = (sh) => {
       float lf = 1.0 - smoothstep(0.3, 1.0, fwidth(lt));
       a = mix(a, a * mix(0.3, 0.12 + 0.75 * thread, lf), ladder);
       a = mix(a, min(1.0, a * 1.5 + 0.2), hEdge);
+      // reinforced toe with seam, and a denser welt band at the top
+      float cap = smoothstep(0.42, 0.56, vToe);
+      float seam = smoothstep(0.36, 0.42, vToe) * (1.0 - smoothstep(0.46, 0.54, vToe));
+      a = mix(a, min(1.0, a * 1.22 + 0.07), cap);
+      a = mix(a, min(1.0, a * 1.5 + 0.15), seam * 0.7);
+      float welt = 1.0 - smoothstep(0.86, 0.985, vMask.y);
+      a = mix(a, min(1.0, a * 1.9 + 0.3), welt);
+      // fabric thins where it is stretched over the heel and the ball of the foot
+      a *= 1.0 - 0.18 * vMask.x * (1.0 - cap);
       a *= mix(1.0, 1.15, uDamp);
       diffuseColor.a = clamp(a, 0.0, 1.0) * vMask.y;
     `)
@@ -464,6 +470,7 @@ function skinVerts() {
   geo.attributes.position.needsUpdate = true;
   geo.attributes.normal.needsUpdate = true;
   body.position.y = -minY;
+  U.uLift.value = -minY;
 }
 
 // arch morph (applied to the rest pose)
@@ -620,9 +627,11 @@ toggle('hoseOn', (on) => { hose.visible = on; });
 toggle('wiggle', (on) => { state.wiggle = on; dirty = true; });
 const setDamp = (v) => {
   U.uDamp.value = v;
-  skinMat.roughness = 0.52 - 0.3 * v;
-  skinMat.clearcoat = 0.06 + 0.94 * v * v;
-  skinMat.clearcoatRoughness = 0.28 - 0.2 * v;
+  skinMat.roughness = 0.5 - 0.34 * v;
+  skinMat.clearcoat = Math.min(1, 0.05 + 1.1 * v);
+  skinMat.clearcoatRoughness = 0.26 - 0.22 * v;
+  skinMat.envMapIntensity = 0.9 + 0.9 * v;
+  skinMat.sheen = 0.35 * (1 - v);
 };
 const setDenier = (v) => { U.uSheer.value = 0.22 + 0.76 * v; };
 $('damp').oninput = (e) => setDamp(+e.target.value);

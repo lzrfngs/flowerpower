@@ -134,6 +134,7 @@ def subdivide(X, Q):
             Q2.append([a, e1, fp, e0])
     return X2, np.array(Q2)
 
+P0, Q0, W0 = P.copy(), Q.copy(), Wt.copy()
 X = np.hstack([P, Wt])
 for _ in range(LEVELS):
     X, Q = subdivide(X, Q)
@@ -170,15 +171,27 @@ for side in 'LR':
         a = tl - h; a /= np.linalg.norm(a)
         up = np.array([0, 1.0, 0]); up -= a * up.dot(a); up /= np.linalg.norm(up)
         sd = np.cross(a, up)
-        sel = np.where(dom == bidx[chain[-1]])[0]
-        d = P[sel] - h
-        ta, ts, tu = d @ a, d @ sd, d @ up
-        tmin, tmax = np.percentile(ta, 5), ta.max()
-        mid = (ta > tmin + 0.3 * (tmax - tmin)) & (ta < tmin + 0.8 * (tmax - tmin))
-        top = tu[mid].max()
-        smin, smax = ts[mid].min(), ts[mid].max()
-        L = tmax - tmin
-        c = h + a * (tmin + 0.56 * L) + sd * (smin + smax) / 2 + up * top
+        # fit the nail to the modelled nail groove: a ring of tiny dorsal faces on the base mesh
+        bi = bidx[chain[-1]]
+        d0 = W0.argmax(axis=1)
+        fsel = np.array([q for q in Q0 if all(d0[i] == bi for i in q)])
+        FP = conv(P0[fsel])
+        fn = np.cross(FP[:, 2] - FP[:, 0], FP[:, 3] - FP[:, 1])
+        area = np.linalg.norm(fn, axis=1) / 2
+        fn /= np.linalg.norm(fn, axis=1)[:, None]
+        fc = FP.mean(axis=1) - h
+        dorsal = fn @ up > 0.2
+        ring = dorsal & (area < np.percentile(area[dorsal], 45))
+        ra, rs = fc[ring] @ a, fc[ring] @ sd
+        a0, a1 = np.percentile(ra, 4), np.percentile(ra, 96)
+        s0, s1 = np.percentile(rs, 4), np.percentile(rs, 96)
+        inside = dorsal & (fc @ a > a0) & (fc @ a < a1) & (fc @ sd > s0) & (fc @ sd < s1)
+        top = np.percentile((fc @ up)[inside], 80)
+        nup = (fn[inside] * area[inside, None]).sum(axis=0); nup /= np.linalg.norm(nup)
+        c = h + a * (a0 + a1) / 2 + sd * (s0 + s1) / 2 + up * top
+        L = (a1 - a0) / 0.72; smin, smax = (s0 - (s1 - s0) * 0.125), (s1 + (s1 - s0) * 0.125)
+        up = nup
+        print(chain[-1], 'nail len %.4f width %.4f' % (a1 - a0, s1 - s0))
         toes.append(dict(side=side, toe=t, bones=[bidx[c_] for c_ in chain],
                          center=c.tolist(), axis=a.tolist(), sideAxis=sd.tolist(), up=up.tolist(),
                          halfLen=float(0.36 * L), halfWidth=float(0.40 * (smax - smin)),
