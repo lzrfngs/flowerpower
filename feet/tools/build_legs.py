@@ -197,6 +197,59 @@ for side in 'LR':
                          halfLen=float(0.36 * L), halfWidth=float(0.40 * (smax - smin)),
                          base=bones[bidx[chain[0]]]['head']))
 
+# ---------- hosiery toe cap ----------
+# Pantyhose don't wrap each toe: the fabric spans them like a sock. Build a separate
+# surface on the convex hull of the toes (swept around a spine running across them).
+from scipy.spatial import ConvexHull, cKDTree
+toe_cols = [i for i, b in enumerate(bones) if b['name'].startswith('toe')]
+NT, NA, NBODY = 72, 12, 40
+capP, capW, capI = [], [], []
+for side in 'LR':
+    cols = [i for i in toe_cols if bones[i]['name'].endswith(side)]
+    tw = Wt[:, cols].sum(axis=1)
+    eq = ConvexHull(P[tw > 0.1]).equations
+    def mid(t):
+        ch = [b for b in bones if b['name'].startswith(f'toe{t}-') and b['name'].endswith(side)]
+        return (np.array(ch[0]['head']) + np.array(ch[-1]['tail'])) / 2
+    A, B = mid(1), mid(5)
+    AB = B - A; ABn = AB / np.linalg.norm(AB)
+    e1 = np.array([0, 1.0, 0]); e1 -= ABn * e1.dot(ABn); e1 /= np.linalg.norm(e1)
+    e2 = np.cross(ABn, e1)
+    rows = [(A, -ABn, (NA - j) / NA * np.pi / 2) for j in range(NA)]
+    rows += [(A + AB * j / NBODY, ABn, 0.0) for j in range(NBODY + 1)]
+    rows += [(B, ABn, (j + 1) / NA * np.pi / 2) for j in range(NA)]
+    pts = np.zeros((len(rows), NT, 3))
+    for j, (o, ax, al) in enumerate(rows):
+        for i in range(NT):
+            th = 2 * np.pi * i / NT
+            d = np.cos(al) * (np.cos(th) * e1 + np.sin(th) * e2) + np.sin(al) * ax
+            den = eq[:, :3] @ d; num = -(eq[:, :3] @ o + eq[:, 3]); ok = den > 1e-9
+            pts[j, i] = o + d * (num[ok] / den[ok]).min()
+    cand = np.where(tw > 0.02)[0]
+    _, nn = cKDTree(P[cand]).query(pts.reshape(-1, 3))
+    w = Wt[cand[nn]].reshape(len(rows), NT, -1)
+    for _ in range(4):
+        up_, dn_ = np.vstack([w[:1], w[:-1]]), np.vstack([w[1:], w[-1:]])
+        w = (2 * w + np.roll(w, 1, axis=1) + np.roll(w, -1, axis=1) + up_ + dn_) / 6
+    base = sum(len(x) for x in capP)
+    tris = []
+    for j in range(len(rows) - 1):
+        for i in range(NT):
+            a_, b_ = base + j * NT + i, base + j * NT + (i + 1) % NT
+            c_, d_ = a_ + NT, b_ + NT
+            tris += [[a_, c_, b_], [b_, c_, d_]]
+    tris = np.array(tris)
+    flat = pts.reshape(-1, 3)
+    t0 = tris[len(tris) // 2] - base
+    nrm = np.cross(flat[t0[1]] - flat[t0[0]], flat[t0[2]] - flat[t0[0]])
+    if nrm.dot(flat[t0[0]] - (A + B) / 2) < 0: tris = tris[:, ::-1]
+    capP.append(flat); capW.append(w.reshape(-1, w.shape[-1])); capI.append(tris)
+capP, capW, capI = np.vstack(capP), np.vstack(capW), np.vstack(capI)
+capToe = capW[:, toe_cols].sum(axis=1)
+corder = np.argsort(-capW, axis=1)[:, :K]
+cw = np.clip(np.take_along_axis(capW, corder, axis=1), 0, None); cw /= cw.sum(axis=1, keepdims=True)
+print('toe cap', len(capP), 'verts', len(capI), 'tris')
+
 def b64(arr, dt):
     return base64.b64encode(np.ascontiguousarray(arr, dtype=dt).tobytes()).decode()
 
@@ -205,6 +258,8 @@ out = dict(
     vertexCount=len(P), influences=K, quadCount=len(Q), ycut=float((ycut - ymin) * S),
     bones=bones, toes=toes,
     positions=b64(P, '<f4'), quads=b64(Q, '<u4'),
+    cap=dict(vertexCount=len(capP), positions=b64(capP, '<f4'), index=b64(capI, '<u4'),
+             skinIndex=b64(corder, 'u1'), skinWeight=b64(np.round(cw * 255), 'u1'), toe=b64(np.round(np.clip(capToe, 0, 1) * 255), 'u1')),
     skinIndex=b64(order, 'u1'), skinWeight=b64(np.round(w4 * 255), 'u1'),
 )
 json.dump(out, open(out_path, 'w'), separators=(',', ':'))

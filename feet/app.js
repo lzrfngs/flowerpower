@@ -23,13 +23,14 @@ const bones = data.bones;
 const NB = bones.length;
 const boneId = Object.fromEntries(bones.map((b, i) => [b.name, i]));
 
-const index = new Uint32Array(data.quadCount * 6);
+const legIndex = new Uint32Array(data.quadCount * 6);
+const index = legIndex;
 for (let q = 0, o = 0; q < data.quadCount; q++) {
   const a = quads[q * 4], b = quads[q * 4 + 1], c = quads[q * 4 + 2], d = quads[q * 4 + 3];
   index[o++] = a; index[o++] = b; index[o++] = c; index[o++] = a; index[o++] = c; index[o++] = d;
 }
 
-function computeNormals(pos, out) {
+function computeNormals(pos, out, index = legIndex) {
   out.fill(0);
   for (let i = 0; i < index.length; i += 3) {
     const a = index[i] * 3, b = index[i + 1] * 3, c = index[i + 2] * 3;
@@ -81,6 +82,7 @@ geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3).setUsage(THREE.
 geo.setAttribute('aRest', new THREE.BufferAttribute(rest0, 3));
 geo.setAttribute('aMask', new THREE.BufferAttribute(mask, 3));
 geo.setAttribute('aToe', new THREE.BufferAttribute(toeAttr, 1));
+geo.setAttribute('aCap', new THREE.BufferAttribute(new Float32Array(NV), 1));
 geo.setIndex(new THREE.BufferAttribute(index, 1));
 geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.5, 0), 3);
 
@@ -178,12 +180,12 @@ for (const t of data.toes) {
 }
 
 const VERT_HEAD = /* glsl */`
-attribute vec3 aRest; attribute vec3 aMask; attribute float aToe;
+attribute vec3 aRest; attribute vec3 aMask; attribute float aToe; attribute float aCap; varying float vCap;
 uniform float uLift;
 varying vec3 vRest; varying vec3 vMask; varying float vToe; varying float vWY;
 `;
 const FRAG_HEAD = /* glsl */`
-varying vec3 vRest; varying vec3 vMask; varying float vToe; varying float vWY;
+varying vec3 vRest; varying vec3 vMask; varying float vToe; varying float vWY; varying float vCap;
 uniform vec3 uBg; uniform float uDamp;
 ` + NOISE;
 
@@ -241,6 +243,8 @@ const hoseMat = new THREE.MeshPhysicalMaterial({
   transparent: true, side: THREE.DoubleSide, envMapIntensity: 0.45, depthWrite: true,
   polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
 });
+const t1 = bones[boneId['toe1-1.L']].head, t5 = bones[boneId['toe5-1.L']].head;
+const CUT = `#define CUT_X ${t1[0].toFixed(5)}\n#define CUT_Z ${(t1[2] + 0.004).toFixed(5)}\n#define CUT_K ${((t5[2] - t1[2]) / (t5[0] - t1[0])).toFixed(5)}\n`;
 hoseMat.onBeforeCompile = (sh) => {
   Object.assign(sh.uniforms, U);
   sh.vertexShader = sh.vertexShader
@@ -249,7 +253,7 @@ hoseMat.onBeforeCompile = (sh) => {
       varying float vStretch;
     `)
     .replace('#include <begin_vertex>', /* glsl */`#include <begin_vertex>
-      vRest = aRest; vMask = aMask; vToe = aToe; vWY = position.y + uLift;
+      vRest = aRest; vMask = aMask; vToe = aToe; vWY = position.y + uLift; vCap = aCap;
       float gd = length(aRest - uGrab) / uGrabR;
       float gw = exp(-gd * gd * 0.9) * 0.45 + exp(-gd * 1.6) * 0.55;
       float pl = length(uPull);
@@ -259,10 +263,14 @@ hoseMat.onBeforeCompile = (sh) => {
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>', '#include <common>\n' + FRAG_HEAD + /* glsl */`
       uniform float uSheer; varying float vStretch;
+      ${CUT}
       uniform vec4 uHoles[${MAX_HOLES}]; uniform vec3 uHoleN[${MAX_HOLES}]; uniform vec3 uRunDir[${MAX_HOLES}];
       uniform vec2 uRunLen[${MAX_HOLES}]; uniform int uHoleCount;
     `)
     .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
+      // the leg fabric stops at the forefoot; the sock-like toe cap takes over from there
+      float cut = vRest.z - (CUT_Z + (abs(vRest.x) - CUT_X) * CUT_K);
+      if (vCap < 0.5 ? cut > 0.0008 : cut < -0.0008) discard;
       float hEdge = 0.0, ladder = 0.0, ladT = 0.0;
       float nA = vnoise(vRest * 95.0), nB = vnoise(vRest * 300.0);
       for (int i = 0; i < ${MAX_HOLES}; i++) {
@@ -303,10 +311,10 @@ hoseMat.onBeforeCompile = (sh) => {
       a = mix(a, a * mix(0.3, 0.12 + 0.75 * thread, lf), ladder);
       a = mix(a, min(1.0, a * 1.5 + 0.2), hEdge);
       // reinforced toe with seam, and a denser welt band at the top
-      float cap = smoothstep(0.42, 0.56, vToe);
-      float seam = smoothstep(0.36, 0.42, vToe) * (1.0 - smoothstep(0.46, 0.54, vToe));
-      a = mix(a, min(1.0, a * 1.22 + 0.07), cap);
-      a = mix(a, min(1.0, a * 1.5 + 0.15), seam * 0.7);
+      float cap = vCap * smoothstep(0.0, 0.004, cut);
+      float seam = 1.0 - smoothstep(0.0006, 0.0022, abs(cut));
+      a = mix(a, min(1.0, a * 1.1 + 0.03), cap);
+      a = mix(a, min(1.0, a * 1.2 + 0.05), seam * 0.5);
       float welt = 1.0 - smoothstep(0.86, 0.985, vMask.y);
       a = mix(a, min(1.0, a * 1.9 + 0.3), welt);
       // fabric thins where it is stretched over the heel and the ball of the foot
@@ -326,8 +334,23 @@ const hose = new THREE.Mesh(geo, hoseMat);
 hose.receiveShadow = true;
 hose.frustumCulled = false;
 hose.renderOrder = 2;
+const capD = data.cap, NC = capD.vertexCount;
+const capRest = b64(capD.positions, Float32Array), capIndex = b64(capD.index, Uint32Array);
+const capSI = b64(capD.skinIndex, Uint8Array), capSW = b64(capD.skinWeight, Uint8Array);
+const capPos = new Float32Array(NC * 3), capNrm = new Float32Array(NC * 3);
+const capGeo = new THREE.BufferGeometry();
+capGeo.setAttribute('position', new THREE.BufferAttribute(capPos, 3).setUsage(THREE.DynamicDrawUsage));
+capGeo.setAttribute('normal', new THREE.BufferAttribute(capNrm, 3).setUsage(THREE.DynamicDrawUsage));
+capGeo.setAttribute('aRest', new THREE.BufferAttribute(capRest, 3));
+capGeo.setAttribute('aMask', new THREE.BufferAttribute(new Float32Array(NC * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+capGeo.setAttribute('aToe', new THREE.BufferAttribute(b64(capD.toe, Uint8Array), 1, true));
+capGeo.setAttribute('aCap', new THREE.BufferAttribute(new Float32Array(NC).fill(1), 1));
+capGeo.setIndex(new THREE.BufferAttribute(capIndex, 1));
+capGeo.boundingSphere = geo.boundingSphere;
+const toeCap = new THREE.Mesh(capGeo, hoseMat);
+toeCap.receiveShadow = true; toeCap.frustumCulled = false; toeCap.renderOrder = 2;
 const body = new THREE.Group();
-body.add(skin, hose);
+body.add(skin, hose, toeCap);
 scene.add(body);
 
 // ───────────────────────── rig ─────────────────────────
@@ -467,6 +490,27 @@ function skinVerts() {
     if (py < minY && mask[v * 3 + 1] > 0.5) minY = py;
   }
   computeNormals(positions, normals);
+  if (hose.visible) {
+    for (let v = 0; v < NC; v++) {
+      m12.fill(0);
+      let ws = 0;
+      for (let k = 0; k < K; k++) {
+        const w = capSW[v * K + k];
+        if (!w) break;
+        const o = capSI[v * K + k] * 12;
+        ws += w;
+        for (let j = 0; j < 12; j++) m12[j] += mats[o + j] * w;
+      }
+      ws = 1 / ws;
+      const x = capRest[v * 3], y = capRest[v * 3 + 1], z = capRest[v * 3 + 2];
+      capPos[v * 3] = (m12[0] * x + m12[1] * y + m12[2] * z + m12[3]) * ws;
+      capPos[v * 3 + 1] = (m12[4] * x + m12[5] * y + m12[6] * z + m12[7]) * ws;
+      capPos[v * 3 + 2] = (m12[8] * x + m12[9] * y + m12[10] * z + m12[11]) * ws;
+    }
+    computeNormals(capPos, capNrm, capIndex);
+    capGeo.attributes.position.needsUpdate = true;
+    capGeo.attributes.normal.needsUpdate = true;
+  }
   geo.attributes.position.needsUpdate = true;
   geo.attributes.normal.needsUpdate = true;
   body.position.y = -minY;
@@ -623,7 +667,7 @@ const toggle = (id, fn) => {
   const b = $(id);
   b.onclick = () => { const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.querySelector('i').textContent = on ? 'on' : 'off'; fn(on); };
 };
-toggle('hoseOn', (on) => { hose.visible = on; });
+toggle('hoseOn', (on) => { hose.visible = toeCap.visible = on; dirty = true; });
 toggle('wiggle', (on) => { state.wiggle = on; dirty = true; });
 const setDamp = (v) => {
   U.uDamp.value = v;
